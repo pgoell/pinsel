@@ -26,7 +26,7 @@ Needs [mise](https://mise.jdx.dev).
 
 ```sh
 mise install      # cmake, ninja, clang-format, clang-tidy, lefthook, cocogitto, jq, aqtinstall
-mise run install-qt  # Qt 6.10 into .qt/; prints the folder for CMAKE_PREFIX_PATH
+mise run install-qt  # Qt into .qt/; set CMAKE_PREFIX_PATH (below) to the folder it prints
 mise run install  # git hooks + configure (fetches GoogleTest)
 mise run test     # Debug build with sanitizers, then ctest
 mise run lint     # clang-format + clang-tidy
@@ -38,7 +38,7 @@ Qt 6.10 or newer comes from `mise run install-qt` or Qt's own installer. Point C
 
 ```toml
 [env]
-CMAKE_PREFIX_PATH = "C:/path/to/pinsel/.qt/6.10.3/msvc2022_64"
+CMAKE_PREFIX_PATH = "<the folder install-qt printed>"
 ```
 
 On Linux, Qt also needs the OpenGL headers (`libgl-dev` on Ubuntu). On Windows, put Qt's `bin` folder on `PATH` so the tests find its DLLs.

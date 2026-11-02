@@ -56,6 +56,10 @@ if(BUILD_TESTING)
   # CI posts every PNG this writes to the pull request.
   add_test(NAME main_window_screenshot
            COMMAND pinsel --screenshot ${CMAKE_BINARY_DIR}/screenshots/main-window.png)
-  set_tests_properties(main_window_screenshot PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  # Windows draws with its native platform, which works on CI runners and shows
+  # the real style; offscreen there has no fonts.
+  if(NOT WIN32)
+    set_tests_properties(main_window_screenshot PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  endif()
   file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/screenshots)
 endif()
