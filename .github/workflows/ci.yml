@@ -56,7 +56,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           fetch-depth: 0
-      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - uses: jdx/mise-action@6be3c7ed4c21d4f76b208d351d95aac273ebb76d # v5.2.4
       - name: Conventional commits
         run: mise run check-commits
 
@@ -149,7 +149,7 @@ jobs:
             echo 'PROMPT_END'
           } >> "$GITHUB_OUTPUT"
       - if: steps.round.outputs.stop == 'false'
-        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+        uses: anthropics/claude-code-action@6d5ae526d25ce88daa2200be073e1a373167f064 # v1.0.265
         env:
           # Strips the tokens from the environment of every command it runs.
           # Files are another matter: the action writes a token into
