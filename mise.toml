@@ -11,6 +11,7 @@ uv        = "latest"
 lefthook  = "latest"
 cocogitto = "latest"
 jq        = "latest"
+"pipx:aqtinstall" = "3.3.0"
 
 # ─── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -20,6 +21,27 @@ run = [
   "lefthook install",
   "cmake --preset dev",
 ]
+
+# aqtinstall 3.3.0 cannot read the Windows layout of Qt 6.11 and newer.
+# In CI the task also points CMake at the new Qt; elsewhere set CMAKE_PREFIX_PATH
+# in mise.local.toml to the folder it prints.
+[tasks.install-qt]
+description = "Download Qt into .qt/ for this OS"
+shell = "bash -c"
+run = '''
+version=6.10.3
+case "$(uname -s)" in
+  Linux) host=linux arch=linux_gcc_64 dir=gcc_64 archives="qtbase icu" ;;
+  *) host=windows arch=win64_msvc2022_64 dir=msvc2022_64 archives=qtbase ;;
+esac
+aqt install-qt "$host" desktop "$version" "$arch" --outputdir .qt --archives $archives
+prefix="$(pwd -W 2>/dev/null || pwd)/.qt/$version/$dir"
+echo "Qt is in $prefix"
+if [ -n "${GITHUB_ENV:-}" ]; then
+  echo "CMAKE_PREFIX_PATH=$prefix" >> "$GITHUB_ENV"
+  echo "$prefix/bin" >> "$GITHUB_PATH"
+fi
+'''
 
 # ─── Build & test ───────────────────────────────────────────────────────────
 

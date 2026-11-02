@@ -10,12 +10,17 @@ if(SANITIZE AND WIN32)
   # AddressSanitizer on Windows needs the release C runtime. UndefinedBehaviorSanitizer
   # runs in trap mode there: it crashes on the first fault and needs no runtime library.
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
+  # Qt's debug DLLs use the debug C runtime, so link its release DLLs.
+  set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
   add_compile_options(-fsanitize=address,undefined -fsanitize-trap=undefined -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
 elseif(SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
 endif()
+
+find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets)
+qt_standard_project_setup()
 
 # Warnings as errors for this project's targets only, not for GoogleTest.
 set(WARNINGS -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
@@ -24,8 +29,8 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
-add_executable(pinsel src/main.cpp)
-target_link_libraries(pinsel PRIVATE pinsel-lib)
+qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp)
+target_link_libraries(pinsel PRIVATE pinsel-lib Qt6::Widgets)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
 include(CTest)
@@ -47,4 +52,10 @@ if(BUILD_TESTING)
   target_compile_options(tests PRIVATE ${WARNINGS})
   include(GoogleTest)
   gtest_discover_tests(tests)
+
+  # CI posts every PNG this writes to the pull request.
+  add_test(NAME main_window_screenshot
+           COMMAND pinsel --screenshot ${CMAKE_BINARY_DIR}/screenshots/main-window.png)
+  set_tests_properties(main_window_screenshot PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/screenshots)
 endif()
