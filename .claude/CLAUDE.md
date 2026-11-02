@@ -42,7 +42,7 @@ mise run check-commits  # cocogitto on unpushed commits
 ## Comments and pull requests
 
 - Names and structure explain the code. A comment says only what the code cannot: a limit from outside it (a spec, a hardware or library quirk) or a reason that would surprise a reader. No comment restates the code, narrates the change or tells its history.
-- A UI change adds or updates a ctest test that runs `pinsel --screenshot <path>` into `build/dev/screenshots/`. CI posts every PNG there to the pull request as evidence.
+- A UI change adds or updates a ctest test that runs `pinsel --screenshot <path> --size <WxH>` into `build/dev/screenshots/`. CI posts every PNG there to the pull request as evidence.
 - The pull request explains the change. Under "Changes" in its body, show each change that needs explaining as a short excerpt of the code, say why it looks that way, and link the docs, spec or issue it follows.
 
 ## Conventions

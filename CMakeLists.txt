@@ -53,13 +53,19 @@ if(BUILD_TESTING)
   include(GoogleTest)
   gtest_discover_tests(tests)
 
-  # CI posts every PNG this writes to the pull request.
-  add_test(NAME main_window_screenshot
-           COMMAND pinsel --screenshot ${CMAKE_BINARY_DIR}/screenshots/main-window.png)
-  # Windows draws with its native platform, which works on CI runners and shows
-  # the real style; offscreen there has no fonts.
+  # CI posts every PNG these write to the pull request: a 1080p screen, and a 4K
+  # screen at 200% scaling.
+  set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
+  file(MAKE_DIRECTORY ${SHOTS})
+  add_test(NAME screenshot_1080p
+           COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080)
+  add_test(NAME screenshot_4k
+           COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080)
+  set_tests_properties(screenshot_4k PROPERTIES ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
+  # Windows draws with its native platform to show the real style; offscreen has
+  # no fonts there.
   if(NOT WIN32)
-    set_tests_properties(main_window_screenshot PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+    set_property(TEST screenshot_1080p screenshot_4k APPEND
+                 PROPERTY ENVIRONMENT_MODIFICATION QT_QPA_PLATFORM=set:offscreen)
   endif()
-  file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/screenshots)
 endif()
