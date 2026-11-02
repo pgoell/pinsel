@@ -19,7 +19,8 @@ elseif(SANITIZE)
   add_link_options(-fsanitize=address,undefined)
 endif()
 
-find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets)
+# Svg is never linked, but its icon plugin draws the tool icons; without it they stay blank.
+find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg)
 qt_standard_project_setup()
 
 # Warnings as errors for this project's targets only, not for GoogleTest.
@@ -31,9 +32,8 @@ target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp
                   src/canvas/canvas.cpp)
-qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons
-                 FILES resources/icons/brush.svg resources/icons/eraser.svg
-                       resources/icons/square-dashed.svg resources/icons/hand.svg)
+file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
+qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
 target_link_libraries(pinsel PRIVATE pinsel-lib Qt6::Widgets)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 

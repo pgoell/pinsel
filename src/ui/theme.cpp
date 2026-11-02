@@ -15,6 +15,7 @@ const QColor kField(30, 30, 30);
 const QColor kText(216, 216, 216);
 const QColor kMuted(128, 128, 128);
 const QColor kAccent(47, 111, 208);
+const QColor kHover(58, 58, 58);
 
 QPalette darkPalette() {
   QPalette palette;
@@ -36,28 +37,31 @@ QPalette darkPalette() {
   return palette;
 }
 
-const char* const kStyleSheet = R"(
-QMenuBar, QStatusBar, QToolBar#tools, QDockWidget::title { background: #252526; }
+QString styleSheet() {
+  return QStringLiteral(R"(
+QMenuBar, QToolBar#tools, QDockWidget::title { background: %1; }
 QMenuBar::item { padding: 6px 10px; }
-QMenuBar::item:selected, QMenu::item:selected { background: #3a3a3a; }
-QMenu { background: #252526; border: 1px solid #3a3a3a; padding: 4px; }
+QMenuBar::item:selected, QMenu::item:selected { background: %2; }
+QMenu { background: %1; border: 1px solid %2; padding: 4px; }
 QMenu::item { padding: 6px 24px 6px 12px; }
 QToolBar#tools { border: none; padding: 6px 4px; spacing: 4px; }
 QToolBar#tools QToolButton { border-radius: 6px; padding: 6px; }
-QToolBar#tools QToolButton:hover { background: #3a3a3a; }
-QToolBar#tools QToolButton:checked { background: #2f6fd0; }
+QToolBar#tools QToolButton:hover { background: %2; }
+QToolBar#tools QToolButton:checked { background: %3; }
 QDockWidget::title { padding: 8px 10px; }
-QMainWindow::separator { background: #1b1b1b; width: 1px; height: 1px; }
+QMainWindow::separator { background: %4; width: 1px; height: 1px; }
 QListWidget { border: none; }
-QSpinBox { border: 1px solid #3a3a3a; border-radius: 4px; padding: 2px 4px; }
-)";
+QSpinBox { border: 1px solid %2; border-radius: 4px; padding: 2px 4px; }
+)")
+      .arg(kBar.name(), kHover.name(), kAccent.name(), kField.name());
+}
 
 }  // namespace
 
 void applyTheme(QApplication& app) {
   QApplication::setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
   QApplication::setPalette(darkPalette());
-  app.setStyleSheet(QString::fromLatin1(kStyleSheet));
+  app.setStyleSheet(styleSheet());
 }
 
 }  // namespace pinsel

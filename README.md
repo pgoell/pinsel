@@ -34,7 +34,7 @@ mise run lint     # clang-format + clang-tidy
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
-Qt 6.10 or newer comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
+Qt 6.10 or newer, with the Qt SVG module, comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
 
 ```toml
 [env]
