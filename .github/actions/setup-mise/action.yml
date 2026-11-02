@@ -3,10 +3,16 @@ description: >
   Bootstraps mise (CMake, Ninja, clang-format, clang-tidy, lefthook, cocogitto).
   Assumes the repo has already been checked out by the caller.
 
+inputs:
+  install_args:
+    description: Tools to install, space-separated; empty installs every tool in mise.toml.
+    default: ""
+
 runs:
   using: composite
   steps:
     - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
       with:
         install: true
+        install_args: ${{ inputs.install_args }}
         cache: true

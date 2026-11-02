@@ -7,10 +7,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
 if(SANITIZE AND WIN32)
-  # Clang on Windows has AddressSanitizer only, and it needs the release C runtime.
+  # AddressSanitizer on Windows needs the release C runtime. UndefinedBehaviorSanitizer
+  # runs in trap mode there: it crashes on the first fault and needs no runtime library.
   set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
-  add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-  add_link_options(-fsanitize=address)
+  add_compile_options(-fsanitize=address,undefined -fsanitize-trap=undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
 elseif(SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
