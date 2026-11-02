@@ -103,7 +103,7 @@ jobs:
           if [ -n "$id" ]; then
             gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
           else
-            gh pr comment "$PR" --body "$body"
+            gh pr comment "$PR" -R "$GITHUB_REPOSITORY" --body "$body"
           fi
 
   commits:
