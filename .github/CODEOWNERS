@@ -1,0 +1,30 @@
+# Paths a pull request may change only with a review from a code owner.
+# Branch protection requires that review, and GitHub reads this file from the
+# base branch, so a pull request cannot take its own paths off the list. A
+# pull request that touches nothing here merges on its checks alone.
+
+# CI, repo settings, the review prompts and this file
+/.github/ @pgoell
+/scripts/ @pgoell
+/mise.toml @pgoell
+/REVIEW.md @pgoell
+
+# Agent settings and git hooks
+/.claude/ @pgoell
+/.config/ @pgoell
+CLAUDE.md @pgoell
+
+# Deploy and containers
+/deploy/ @pgoell
+Dockerfile* @pgoell
+compose*.yml @pgoell
+compose*.yaml @pgoell
+
+# Migrations
+migrations/ @pgoell
+
+# Build files, which pin the dependencies, and the lint rules
+CMakeLists.txt @pgoell
+CMakePresets.json @pgoell
+/cmake/ @pgoell
+/.clang-tidy @pgoell

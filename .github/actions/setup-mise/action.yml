@@ -1,0 +1,12 @@
+name: Setup mise toolchain and caches
+description: >
+  Bootstraps mise (CMake, Ninja, clang-format, clang-tidy, lefthook, cocogitto).
+  Assumes the repo has already been checked out by the caller.
+
+runs:
+  using: composite
+  steps:
+    - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      with:
+        install: true
+        cache: true

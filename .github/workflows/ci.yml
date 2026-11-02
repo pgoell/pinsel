@@ -1,0 +1,171 @@
+name: CI
+
+on:
+  # `ready_for_review` beside the defaults, so a draft marked ready gets the
+  # reviews it skipped while a draft.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: ./.github/actions/setup-mise
+      - name: clang-format and clang-tidy
+        run: mise run lint
+      - name: File size
+        run: scripts/check-file-size
+      - name: Fan-out
+        run: scripts/check-fan-out --all
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: ./.github/actions/setup-mise
+      - name: CTest
+        run: mise run test
+
+  commits:
+    name: Commits
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+      - uses: jdx/mise-action@c37c93293d6b742fc901e1406b8f764f6fb19dac # v2.4.4
+      - name: Conventional commits
+        run: mise run check-commits
+
+  # The reviews run on `pull_request`, never `pull_request_target`: a pull
+  # request from a fork runs with no secrets and a read-only token, so its code
+  # never meets the OAuth token. Anyone may comment on a public pull request,
+  # so the reviewer reads no comment straight from GitHub: a step writes it the
+  # pull request and the earlier threads by the bot, the author and the code
+  # owners. It can read files in the checkout, run git, post inline comments
+  # and write its summary, nothing more; the steps around it do the rest with
+  # the token.
+  review:
+    name: ${{ matrix.name }}
+    # The job always runs and its first step decides, as a matrix job skipped by
+    # its `if:` never expands: it reports one check named `${{ matrix.name }}`,
+    # and the required Review and Security would wait forever. So a fork or a
+    # Dependabot pull request (whose runs see neither the token nor write
+    # access), a draft, or a run whose Lint or Test did not pass passes here
+    # with no round; a code owner reads the first two by hand.
+    needs: [lint, test]
+    if: ${{ !cancelled() && github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: review
+            name: Review
+          - kind: security
+            name: Security
+    env:
+      KIND: ${{ matrix.kind }}
+      PR: ${{ github.event.pull_request.number }}
+      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      APPROVERS: pgoell
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - id: decide
+        env:
+          RUN: >-
+            ${{ needs.lint.result == 'success' && needs.test.result == 'success' &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            github.event.pull_request.user.login != 'dependabot[bot]' &&
+            !github.event.pull_request.draft }}
+        run: |
+          echo "run=$RUN" >> "$GITHUB_OUTPUT"
+          if [ "$RUN" != true ]; then echo "No round: a fork, Dependabot, a draft, or Lint or Test did not pass." >> "$GITHUB_STEP_SUMMARY"; fi
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The scrub below runs each command in Claude Code's sandbox, which needs
+      # bubblewrap and socat, neither on the runner image, and user namespaces,
+      # which Ubuntu's AppArmor blocks by default.
+      - if: steps.decide.outputs.run == 'true'
+        run: |
+          sudo apt-get install -y -qq bubblewrap socat
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+      # Out of the checkout, where the reviewer's git cannot write over it.
+      - if: steps.decide.outputs.run == 'true'
+        run: cp .github/review/round.sh .github/review/context.sh "$RUNNER_TEMP/"
+      - id: base
+        if: steps.decide.outputs.run == 'true'
+        run: echo "sha=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)" >> "$GITHUB_OUTPUT"
+      - id: round
+        if: steps.decide.outputs.run == 'true'
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+        run: bash "$RUNNER_TEMP/round.sh" plan
+      - if: steps.round.outputs.stop == 'false'
+        run: bash "$RUNNER_TEMP/context.sh"
+      - id: prompt
+        if: steps.round.outputs.stop == 'false'
+        env:
+          FROM: ${{ steps.round.outputs.from }}
+          ROUND: ${{ steps.round.outputs.round }}
+          MAX: ${{ steps.round.outputs.max }}
+        run: |
+          {
+            echo 'text<<PROMPT_END'
+            echo "Round $ROUND of $MAX. FROM: $FROM. HEAD: $HEAD_SHA."
+            echo
+            sed -e "s|{FROM}|$FROM|g" ".github/review/$KIND.md"
+            echo 'PROMPT_END'
+          } >> "$GITHUB_OUTPUT"
+      - if: steps.round.outputs.stop == 'false'
+        uses: anthropics/claude-code-action@d70510b174a1244958df0b03166a54912811f3e6 # v1.0.264
+        env:
+          # Strips the tokens from the environment of every command it runs.
+          # Files are another matter: the action writes a token into
+          # .git/config, so the reviewer may not read .git.
+          CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: 1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --disallowedTools "Read(./.git/**)"
+            --allowedTools "Read(./**),Write(./.review/summary.md),Edit(./.review/summary.md),Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git grep:*),Bash(git ls-files:*),mcp__github_inline_comment__create_inline_comment"
+      - if: steps.round.outputs.stop == 'false'
+        run: |
+          if [ -s .review/summary.md ]; then
+            gh pr comment "$PR" --body-file .review/summary.md
+          else
+            echo "The reviewer wrote no summary." >&2
+            exit 1
+          fi
+      # Only after a review that ran to the end, so a failed run is redone in
+      # full by its rerun and not counted as a round.
+      - if: steps.round.outputs.rerun == 'false'
+        env:
+          ROUND: ${{ steps.round.outputs.round }}
+          FROM: ${{ steps.round.outputs.from }}
+          COMMENT_ID: ${{ steps.round.outputs.comment_id }}
+        run: bash "$RUNNER_TEMP/round.sh" record

@@ -1,0 +1,5 @@
+{
+  "github_owned_allowed": true,
+  "verified_allowed": true,
+  "patterns_allowed": ["jdx/*", "amannn/*", "anthropics/claude-code-action@*", "oven-sh/setup-bun@*"]
+}

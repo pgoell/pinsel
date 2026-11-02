@@ -1,0 +1,167 @@
+#!/usr/bin/env bash
+# Canonical copy: plugins/structure/skills/setting-up-the-checks/assets/check-file-size
+# in pgoell/pgoell-claude-tools. Every other copy stays byte-identical to it.
+#
+# Fail when an authored file passes 5000 tokens (bytes/4); checks the given
+# paths, or every tracked file.
+set -euo pipefail
+
+LIMIT=5000
+
+# Globs for files no person or agent writes by hand, as git pathspec globs.
+EXCLUDES=(
+  # lockfiles
+  '**/mise.lock' '**/package-lock.json' '**/yarn.lock' '**/pnpm-lock.yaml'
+  '**/bun.lockb' '**/uv.lock' '**/poetry.lock' '**/Pipfile.lock'
+  '**/Cargo.lock' '**/Gemfile.lock' '**/composer.lock' '**/go.sum'
+  '**/flake.lock'
+  # binaries
+  '**/*.png' '**/*.jpg' '**/*.jpeg' '**/*.gif' '**/*.webp' '**/*.ico'
+  '**/*.woff' '**/*.woff2' '**/*.ttf' '**/*.otf' '**/*.pdf'
+  # license texts
+  '**/LICENSE*' '**/NOTICE'
+)
+
+# A repo adds its own globs in .file-size-excludes at its root: one per line,
+# "#" starts a comment line, blank lines are skipped. A missing file adds none.
+# "\n", "\t", "\r" and "\s" stand for a newline, tab, CR and space, so that the
+# name a report shows works here; git reads every other "\" (see escape, below).
+# Only a regular file counts, and only its first MiB: a repo nobody has read may
+# hold a FIFO, a symlink to a device or a huge file there.
+# A line over 512 bytes or with more than 4 "**" is skipped, and so is every glob
+# after the 1024th: each could cost seconds to hours, or pass the limit for git's
+# arguments. A file they fail to skip gets reported.
+# tr first: a NUL between two "*" would hide a "**" from awk.
+# $(...) strips every newline that ends the name, so the output ends in a mark.
+top=$(git rev-parse --show-toplevel && echo x)
+top=${top%$'\n'x}
+if [ -f "$top/.file-size-excludes" ]; then
+  escapes=0
+  while IFS= read -r glob || [ -n "$glob" ]; do
+    glob=${glob%$'\r'}
+    glob=${glob#"${glob%%[![:space:]]*}"}
+    glob=${glob%"${glob##*[![:space:]]}"}
+    case $glob in '' | '#'*) continue ;; esac
+    # No real file needs 64 KiB of such lines: the loop could cost minutes on a file
+    # nobody has read.
+    case $glob in *\\*) escapes=$((escapes + ${#glob})) ;; esac
+    if [ "$escapes" -le 65536 ]; then
+      rest=$glob
+      glob=
+      while [[ $rest == *\\* ]]; do
+        glob+=${rest%%\\*}
+        rest=${rest#*\\}
+        case ${rest:0:1} in
+          n) glob+=$'\n' ;;
+          t) glob+=$'\t' ;;
+          r) glob+=$'\r' ;;
+          s) glob+=' ' ;;
+          *) glob+=\\${rest:0:1} ;;
+        esac
+        rest=${rest:1}
+      done
+      glob+=$rest
+    fi
+    EXCLUDES+=("$glob")
+  done < <(head -c 1048576 "$top/.file-size-excludes" 2>/dev/null | LC_ALL=C tr '\0' '\1' 2>/dev/null | LC_ALL=C awk 'length($0) <= 512 && !/^[ \t\r]*(#|$)/ && gsub(/\*\*+/, "&") <= 4 { if (++n > 1024) exit; print }')
+fi
+
+# The "top" magic anchors excludes at the repo root while arguments resolve
+# against the caller's directory.
+pathspecs=()
+for glob in "${EXCLUDES[@]}"; do pathspecs+=(":(top,exclude,glob)$glob"); done
+
+# Sets escaped to name $1 as one line that survives a line reader: "\" as "\\",
+# newline, tab and CR as "\n", "\t", "\r", and a "#" or space that starts it as
+# "\#", "\s". Each name gets its own call, so none can merge.
+escape() {
+  escaped=${1//\\/\\\\}
+  escaped=${escaped//$'\n'/\\n}
+  escaped=${escaped//$'\t'/\\t}
+  escaped=${escaped//$'\r'/\\r}
+  case $escaped in
+    '#'*) escaped=\\$escaped ;;
+    ' '*) escaped=\\s${escaped# } ;;
+  esac
+}
+
+# Files, not process substitutions, so a git failure stops the script.
+list=$(mktemp)
+sizes=$(mktemp)
+index=$(mktemp)
+trap 'rm -f "$list" "$sizes" "$index"' EXIT
+
+# "literal" makes a "*" or a leading ":" in a file name match only itself.
+args=()
+for arg in "$@"; do args+=(":(literal)$arg"); done
+if [ "${#args[@]}" -eq 0 ]; then
+  args=(':(top)')
+  # A bare run (pre-push, CI) judges what is committed, not what is staged,
+  # so it reads HEAD's tree into a throwaway index. With arguments
+  # (pre-commit) or before the first commit, the real index is sized.
+  if git rev-parse -q --verify HEAD >/dev/null; then
+    export GIT_INDEX_FILE=$index
+    git read-tree HEAD
+  fi
+fi
+# git 2.43 drops a leading "**/" exclude when all arguments share a folder
+# prefix. ".git" at the root is never tracked, so this matches nothing and
+# only clears that prefix.
+args+=(':(top,literal).git')
+
+# Records "mode sha stage<TAB>path": the staged copy is what the commit carries.
+git ls-files -s -z --full-name -- "${args[@]}" "${pathspecs[@]}" >"$list"
+
+paths=()
+shas=()
+while IFS= read -r -d '' record; do
+  meta=${record%%$'\t'*}
+  # Skip symlinks and submodules; a path deleted from the worktree but still
+  # staged is sized.
+  case $meta in 120000\ * | 160000\ *) continue ;; esac
+  rest=${meta#* }
+  shas+=("${rest%% *}")
+  paths+=("${record#*$'\t'}")
+done <"$list"
+if [ "${#shas[@]}" -eq 0 ]; then exit 0; fi
+
+printf '%s\n' "${shas[@]}" | git cat-file --batch-check='%(objectsize)' >"$sizes"
+
+failed=0
+i=0
+while IFS= read -r bytes; do
+  path=${paths[$i]}
+  i=$((i + 1))
+  tokens=$((bytes / 4))
+  if [ "$tokens" -gt "$LIMIT" ]; then
+    escape "$path"
+    echo "file-size: $escaped is ~$tokens tokens (bytes/4); the limit is $LIMIT." >&2
+    failed=1
+  fi
+done <"$sizes"
+
+if [ "$failed" -eq 0 ]; then exit 0; fi
+
+printf '%s\n' \
+  '' \
+  'Big files cost agents: they read them in pieces and lose track. Do not fix this' \
+  'by cutting the file into parts by line count, or by moving code into' \
+  'pass-through wrappers, barrel files or a utils grab bag. That gives many' \
+  'shallow modules, and a reader then has to open all of them.' \
+  '' \
+  'Split along a deep module instead (John Ousterhout, "A Philosophy of Software' \
+  'Design"): a module whose interface is small next to what it hides.' \
+  '1. List what the file does. Find a group of functions that share state or' \
+  '   knowledge the rest of the file does not need.' \
+  '2. Move that group into its own module behind a few functions. Callers should' \
+  '   not need to know how it works inside.' \
+  "3. Check: if the new module's interface is nearly as big as its body, or every" \
+  '   caller still reaches into its details, you picked the wrong line. Try again.' \
+  '- Tests: split by the behaviour or module under test, one file per unit,' \
+  '  shared fixtures in one helper.' \
+  '- Docs: split by topic into a folder with an index page that links them.' \
+  '- Data (word lists, fixtures): move it into a data file and add it to the' \
+  '  exclude list, if no person or agent edits it by hand.' \
+  '- Skills: a SKILL.md over the limit moves step detail into references/ and' \
+  '  links it from the step that needs it.' >&2
+exit 1

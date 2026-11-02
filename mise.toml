@@ -1,0 +1,75 @@
+# mise.toml: toolchain pins and task definitions
+
+[tools]
+cmake     = "latest"
+ninja     = "latest"
+# uv runs the pipx backend. clang-format and clang-tidy stay on one major
+# version, so a new release does not reformat the code or add findings.
+uv        = "latest"
+"pipx:clang-format" = "23"
+"pipx:clang-tidy"   = "23"
+lefthook  = "latest"
+cocogitto = "latest"
+jq        = "latest"
+
+# ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+[tasks.install]
+description = "Install git hooks and dependencies"
+run = [
+  "lefthook install",
+  "cmake --preset dev",
+]
+
+# ─── Build & test ───────────────────────────────────────────────────────────
+
+# The dev preset builds Debug with AddressSanitizer and UndefinedBehaviorSanitizer.
+[tasks.build]
+description = "Configure and build the dev preset"
+run = [
+  "cmake --preset dev",
+  "cmake --build --preset dev",
+]
+
+[tasks.test]
+description = "Run tests under the sanitizers"
+depends = ["build"]
+run = "ctest --preset dev"
+
+# ─── Lint & format ──────────────────────────────────────────────────────────
+
+# clang-tidy reads build/dev/compile_commands.json, which the configure writes.
+[tasks.lint]
+description = "Format-check and clang-tidy"
+run = [
+  "git ls-files -z -co --exclude-standard '*.cpp' '*.hpp' | xargs -0 -r clang-format --dry-run --Werror",
+  "cmake --preset dev",
+  "git ls-files -z -co --exclude-standard '*.cpp' | xargs -0 -r clang-tidy -p build/dev --quiet",
+]
+
+[tasks.fmt]
+description = "Auto-format"
+run = "git ls-files -z -co --exclude-standard '*.cpp' '*.hpp' | xargs -0 -r clang-format -i"
+
+# ─── Commits ────────────────────────────────────────────────────────────────
+
+[tasks.check-commits]
+description = "Verify commits since origin/master are conventional"
+# Before the first push there is no origin/master: check the whole history.
+run = '''
+if git rev-parse -q --verify origin/master >/dev/null; then
+  cog check origin/master..HEAD
+else
+  cog check
+fi
+'''
+
+# ─── GitHub repo config ─────────────────────────────────────────────────────
+
+[tasks."repo:apply-settings"]
+description = "Apply GitHub repo + branch-protection settings from .github/*.json, turn on Dependabot security updates"
+run = "bash scripts/apply-github-settings.sh"
+
+[tasks."repo:check-settings"]
+description = "Diff live branch protection against .github/branch-protection.json, check security settings"
+run = "bash scripts/apply-github-settings.sh --check"

@@ -1,0 +1,10 @@
+# C++
+build/
+.cache/
+
+# Secrets
+.env
+
+# Editors / OS
+.DS_Store
+.idea/

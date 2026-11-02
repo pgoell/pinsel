@@ -1,0 +1,344 @@
+#!/usr/bin/env bash
+# Canonical copy: plugins/structure/skills/setting-up-the-checks/assets/check-fan-out
+# in pgoell/pgoell-claude-tools. Every other copy stays byte-identical to it.
+#
+# Fail when a folder holds more than LIMIT entries (files and folders).
+#   check-fan-out <path>...        checks the folders above each path
+#   check-fan-out --all            checks every folder
+#   check-fan-out --update-baseline
+#                                  lowers or drops lines in .fan-out-baseline,
+#                                  never raises or adds one; a missing file is
+#                                  written from today's overages
+# Exit 1 reports folders. Exit 2 is a usage error or an excludes file that costs too
+# much to match; then no folder is reported and no baseline written.
+# Entries come from git: tracked plus untracked, never ignored. The repo root
+# and names that start with "." (and all below them) are skipped. A report, the
+# baseline and the excludes write a folder's name as escape, below, says, so that
+# each folder has one line and the name a report shows works in both files.
+set -euo pipefail
+
+LIMIT=7
+
+if [ "$#" -eq 0 ]; then
+  echo 'usage: check-fan-out <path>... | --all | --update-baseline' >&2
+  exit 2
+fi
+
+# $(...) strips every newline that ends the name, so the output ends in a mark.
+top=$(git rev-parse --show-toplevel && echo x)
+top=${top%$'\n'x}
+prefix=$(git rev-parse --show-prefix)
+
+# Files, not process substitutions, so a git failure stops the script.
+want=$(mktemp)
+list=$(mktemp)
+out=$(mktemp)
+base=$(mktemp)
+excl=$(mktemp)
+trap 'rm -f "$want" "$list" "$out" "$base" "$excl"' EXIT
+
+# Sets escaped to name $1 as one line that survives a line reader: "\" as "\\",
+# newline, tab and CR as "\n", "\t", "\r", and a "#" or space that starts it as
+# "\#", "\s". Each name gets its own call, so none can merge.
+escape() {
+  escaped=${1//\\/\\\\}
+  escaped=${escaped//$'\n'/\\n}
+  escaped=${escaped//$'\t'/\\t}
+  escaped=${escaped//$'\r'/\\r}
+  case $escaped in
+    '#'*) escaped=\\$escaped ;;
+    ' '*) escaped=\\s${escaped# } ;;
+  esac
+}
+
+mode=check
+case $1 in
+  --all) mode=all ;;
+  --update-baseline) mode=update ;;
+  *)
+    # Every folder above each path, as a path from the repo root. Paths
+    # outside the repo are skipped.
+    for arg in "$@"; do
+      case $arg in
+        "$top"/*) path=${arg#"$top"/} ;;
+        /*) continue ;;
+        *) path=$prefix${arg#./} ;;
+      esac
+      escape "$path"
+      path=$escaped
+      while [ "${path%/*}" != "$path" ]; do
+        path=${path%/*}
+        printf '%s\n' "$path"
+      done
+    done >"$want"
+    ;;
+esac
+
+git -C "$top" ls-files -z --cached --others --exclude-standard >"$list"
+
+# Baseline lines are "<folder> <count>"; exclude lines are globs ("*" and "?" stay
+# in one folder, "**" crosses folders, "?" takes one byte, as in git). In both files "#" starts a comment line
+# and blank lines are skipped.
+# Only a regular file counts, and only its first MiB: a repo nobody has read may
+# hold a FIFO, a symlink to a device or a huge file there.
+# A line of the excludes over 512 bytes or with more than 4 "**" is skipped, as in
+# check-file-size, and so is every glob after the 1024th: each costs time on every
+# folder over the limit. A folder they fail to skip gets reported.
+# tr first: a NUL between two "*" would hide a "**" from awk.
+fresh=1
+if [ -f "$top/.fan-out-baseline" ]; then
+  fresh=0
+  head -c 1048576 "$top/.fan-out-baseline" >"$base" 2>/dev/null || :
+fi
+if [ -f "$top/.fan-out-excludes" ]; then head -c 1048576 "$top/.fan-out-excludes" 2>/dev/null | LC_ALL=C tr '\0' '\1' 2>/dev/null | LC_ALL=C awk 'length($0) <= 512 && !/^[ \t\r]*(#|$)/ && gsub(/\*\*+/, "&") <= 4 { if (++n > 1024) exit; print }' >"$excl" || :; fi
+while IFS= read -r -d '' path; do
+  escape "$path"
+  printf '%s\n' "$escaped"
+done <"$list" | LC_ALL=C awk -v mode="$mode" -v limit="$LIMIT" -v want="$want" -v fresh="$fresh" \
+  -v base="$base" -v excl="$excl" '
+function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+# Globs get a matcher of their own: a regex built from one made mawk backtrack for
+# minutes on many "*" or on "**/**/**/**/zz" over a very deep path. compile turns a
+# glob into tokens, stored from first[g] up: "L" (plain text in lit), "F" ("*" then
+# plain text), "?", "*", "A" ("**") and "S" ("**/"). Only *, ** and ? are special.
+function compile(g,   i, c) {
+  first[++nex] = nt + 1
+  for (i = 1; i <= length(g); i++) {
+    c = substr(g, i, 1)
+    # A run of "*" past the second adds nothing, as in git.
+    while (substr(g, i, 3) == "***") i++
+    if (substr(g, i, 3) == "**/") {
+      i += 2
+      # "**/**/" matches what "**/" matches.
+      if (nt < first[nex] || tok[nt] != "S") tok[++nt] = "S"
+    } else if (substr(g, i, 2) == "**") { i++; tok[++nt] = "A" }
+    # "*?*" reaches just what "?*" does, so a run of them costs one "*".
+    else if (c == "*" && nt > first[nex] && tok[nt] == "?" && tok[nt - 1] == "*") { tok[nt - 1] = "?"; tok[nt] = "*" }
+    else if (c == "*" || c == "?") tok[++nt] = c
+    else if (nt >= first[nex] && (tok[nt] == "L" || tok[nt] == "F")) lit[nt] = lit[nt] c
+    else if (nt >= first[nex] && tok[nt] == "*") { tok[nt] = "F"; lit[nt] = c }
+    else { tok[++nt] = "L"; lit[nt] = c }
+  }
+  first[nex + 1] = nt + 1
+  # What d must hold for the walk to get anywhere: its least length, and each plain
+  # text once.
+  for (i = first[nex]; i <= nt; i++) {
+    if (tok[i] == "?") least[nex]++
+    else if (tok[i] == "L" || tok[i] == "F") {
+      least[nex] += length(lit[i])
+      if (!((nex, lit[i]) in held)) { held[nex, lit[i]] = 1; need[nex, ++nneed[nex]] = lit[i] }
+    }
+  }
+}
+# Past budget the run stops with no result: tokens times path length times 1024 globs
+# times every folder cannot be bounded by any cap on a line, and to go on without the
+# globs would report folders the excludes cover. END sets budget to a fixed part, which
+# busybox awk spends inside the 30 s of the hook, plus a part per folder over the limit. So
+# a file that spends no more than that per folder never stops as the repo grows; 8 globs
+# of 10 "*" spend 623 per folder, and 66 globs at 62 steps each fit. One that spends more
+# can still stop.
+function spend(k) {
+  if ((steps += k) <= budget) return
+  print "check-fan-out: .fan-out-excludes costs too much to match here. Use fewer globs or fewer wildcards in a glob." > "/dev/stderr"
+  exit 2
+}
+# Walks the tokens of glob g over d and keeps, in rising order, each offset in d the
+# tokens so far can end at. No token sees an offset twice, so one call costs at most
+# tokens times the length of d, on any awk. after_slash lists the offsets just past
+# each "/" in d; excluded fills it once per folder.
+function matches(d, g,   len, t, k, w, wl, i, j, n, m, p, q, s, c, once, last) {
+  len = length(d)
+  if (len < least[g]) return 0
+  # A glob that ends in plain text mostly fails here, at the cost of one compare.
+  t = first[g + 1] - 1
+  if (t >= first[g] && (tok[t] == "L" || tok[t] == "F") && substr(d, len - length(lit[t]) + 1) != lit[t]) return 0
+  for (i = 1; i <= nneed[g]; i++) if (!index(d, need[g, i])) { if (i > 4) spend(i); return 0 }
+  n = 1
+  at[1] = 1
+  last = first[g + 1]
+  for (t = first[g]; t < last && n > 0; t++) {
+    k = tok[t]
+    # A last "**" or "*" needs no walk: "vendor/**" over many folders must cost little.
+    if (t == last - 1 && k == "A") return 1
+    if (t == last - 1 && k == "*") return at[n] >= (nslash ? after_slash[nslash] : 1)
+    m = 0
+    if (k == "L") {
+      w = lit[t]
+      wl = length(w)
+      for (i = 1; i <= n; i++) if (substr(d, at[i], wl) == w) next_at[++m] = at[i] + wl
+    } else if (k == "F") {
+      # The text may start anywhere up to the next "/". A "*" after it reaches all
+      # that a later hit would, so then the first hit is enough.
+      w = lit[t]
+      wl = length(w)
+      q = s = 0
+      once = t + 1 < last && (tok[t + 1] == "*" || tok[t + 1] == "F")
+      for (i = 1; i <= n; i++) {
+        p = at[i]
+        if (p <= q) continue
+        while (++s <= nslash && after_slash[s] <= p) continue
+        q = s <= nslash ? after_slash[s--] - 1 : len + 1
+        while ((j = index(substr(d, p, q - p + wl), w)) > 0) {
+          p += j - 1
+          next_at[++m] = p + wl
+          if (once) break
+          p++
+        }
+      }
+    } else if (k == "?") {
+      for (i = 1; i <= n; i++) {
+        p = at[i]
+        c = substr(d, p, 1)
+        if (c != "" && c != "/") next_at[++m] = p + 1
+      }
+    } else if (k == "*") {
+      q = 0
+      for (i = 1; i <= n; i++) {
+        for (p = at[i]; p > q; p++) {
+          next_at[++m] = q = p
+          c = substr(d, p, 1)
+          if (c == "" || c == "/") break
+        }
+      }
+    } else if (k == "A") {
+      for (p = at[1]; p <= len + 1; p++) next_at[++m] = p
+    } else {
+      # "**/": where the last token ended, or just past any later "/".
+      j = 1
+      for (i = 1; i <= nslash; i++) {
+        p = after_slash[i]
+        if (p <= at[1]) continue
+        while (j <= n && at[j] < p) next_at[++m] = at[j++]
+        if (j <= n && at[j] == p) j++
+        next_at[++m] = p
+      }
+      while (j <= n) next_at[++m] = at[j++]
+    }
+    spend(n + m + 8)
+    n = m
+    for (i = 1; i <= n; i++) at[i] = next_at[i]
+  }
+  return n > 0 && at[n] == len + 1
+}
+# A raw tab or CR, as an older file or a person writes it, reads as its escape.
+function raw(s,   n, part, i) {
+  n = split(s, part, "\t")
+  s = part[1]
+  for (i = 2; i <= n; i++) s = s "\\t" part[i]
+  n = split(s, part, "\r")
+  s = part[1]
+  for (i = 2; i <= n; i++) s = s "\\r" part[i]
+  return s
+}
+# Globs match the name itself, so that no glob sees the letters of an escape: this
+# undoes the escapes in a folder and in a glob. A "\" before anything else stays.
+function plain(s,   out, i, c, e) {
+  if (substr(s, 1, 2) == "\\#") s = "#" substr(s, 3)
+  else if (substr(s, 1, 2) == "\\s") s = " " substr(s, 3)
+  out = ""
+  while ((i = index(s, "\\")) > 0) {
+    c = substr(s, i + 1, 1)
+    e = c == "\\" ? "\\" : c == "n" ? "\n" : c == "t" ? "\t" : c == "r" ? "\r" : ""
+    if (e == "") { out = out substr(s, 1, i); s = substr(s, i + 1) }
+    else { out = out substr(s, 1, i - 1) e; s = substr(s, i + 2) }
+  }
+  return out s
+}
+function excluded(d,   i, rest, s) {
+  d = plain(d)
+  nslash = s = 0
+  rest = d
+  while ((i = index(rest, "/")) > 0) {
+    s += i
+    after_slash[++nslash] = s + 1
+    rest = substr(rest, i + 1)
+  }
+  for (i = 1; i <= nex; i++) if (matches(d, i)) return 1
+  return 0
+}
+BEGIN {
+  while ((getline line < excl) > 0) {
+    line = trim(line)
+    if (line != "" && line !~ /^#/) compile(plain(line))
+  }
+  while ((getline line < base) > 0) {
+    line = trim(line)
+    if (line == "" || line ~ /^#/) continue
+    n = line; sub(/.* /, "", n)
+    p = line; sub(/ [^ ]*$/, "", p)
+    baseline[raw(p)] = n + 0
+  }
+  while ((getline line < want) > 0) wanted[line] = 1
+}
+{
+  n = split($0, part, "/")
+  dir = ""
+  for (i = 1; i <= n; i++) {
+    if (substr(part[i], 1, 1) == ".") break
+    if (i > 1 && !((dir, part[i]) in seen)) { seen[dir, part[i]] = 1; count[dir]++ }
+    dir = (i == 1) ? part[i] : dir "/" part[i]
+  }
+}
+END {
+  for (d in count) if (count[d] > limit && (mode != "check" || d in wanted)) over++
+  budget = 8000000 + 4096 * over
+  if (mode == "update") {
+    if (fresh) {
+      for (d in count) if (count[d] > limit && !excluded(d)) print d " " count[d]
+      exit
+    }
+    close(base)
+    while ((getline line < base) > 0) {
+      t = trim(line)
+      if (t == "" || t ~ /^#/) { print line; continue }
+      p = t; sub(/ [^ ]*$/, "", p)
+      p = raw(p)
+      if (count[p] > limit && !excluded(p))
+        print p " " (count[p] < baseline[p] ? count[p] : baseline[p])
+    }
+    exit
+  }
+  for (d in count) {
+    if (mode == "check" && !(d in wanted)) continue
+    if (count[d] <= limit || excluded(d)) continue
+    if (d in baseline && count[d] <= baseline[d]) continue
+    msg = "fan-out: " d " holds " count[d] " entries; the limit is " limit
+    if (d in baseline) msg = msg " and its baseline is " baseline[d]
+    print msg "."
+  }
+}' >"$out"
+
+if [ "$mode" = update ]; then
+  # A new file comes out of an unordered loop, so sort it.
+  if [ "$fresh" -eq 1 ]; then
+    printf '%s\n' '# Folders over the fan-out limit, as "<folder> <count>". A folder fails' \
+      '# when it grows past its count. check-fan-out --update-baseline only' \
+      '# lowers or drops lines; to raise one, edit this file by hand.'
+    LC_ALL=C sort "$out"
+  else
+    cat "$out"
+  fi >"$list"
+  cp "$list" "$top/.fan-out-baseline"
+  exit 0
+fi
+
+if [ ! -s "$out" ]; then exit 0; fi
+
+LC_ALL=C sort "$out" >&2
+printf '%s\n' \
+  '' \
+  'A folder with many entries makes agents and people read the whole list to' \
+  'find one thing. Do not fix this by moving files into folders picked at' \
+  'random or by size, or into a bucket such as utils/, helpers/, common/ or' \
+  'misc/. That only moves the long list somewhere else.' \
+  '' \
+  'Group by concept instead: find the entries that serve one idea and move them' \
+  'into a subfolder named after it. Make that subfolder a deep module (John' \
+  'Ousterhout, "A Philosophy of Software Design"): one entry point with a small' \
+  'interface, the rest hidden behind it. Then fix the imports and links.' \
+  '' \
+  'If no grouping fits (a log of dated files, one file per item of a list), add' \
+  'the folder to .fan-out-excludes at the repo root, with a comment line above' \
+  'it that says why. Raising its number in .fan-out-baseline by hand is not a' \
+  'fix.' >&2
+exit 1

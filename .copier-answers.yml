@@ -1,0 +1,10 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: acc09d3
+_src_path: gh:pgoell/project-template
+approvers: pgoell
+context: personal
+default_branch: master
+description: Native image editor for generating images and local edits, built by hand
+    down to its own GPU kernels.
+project_name: pinsel
+stack: cpp

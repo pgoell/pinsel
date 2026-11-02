@@ -1,0 +1,5 @@
+BasedOnStyle: Google
+ColumnLimit: 100
+# A function body always gets its own lines, so a line's length never decides
+# the layout.
+AllowShortFunctionsOnASingleLine: Empty
