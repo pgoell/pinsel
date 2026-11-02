@@ -33,6 +33,8 @@ mise run lint     # clang-format + clang-tidy
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
+Windows is the main platform, and CI runs the tests there only. Build with Clang (`set CXX=clang++` before `mise run install`) from LLVM or Visual Studio's Clang tools. The tests need AddressSanitizer's runtime DLL on `PATH`: add the folder that `clang++ -print-resource-dir` prints, plus `\lib\windows`. Clang on Windows has no UndefinedBehaviorSanitizer, so the dev build runs AddressSanitizer alone there.
+
 The Claude Code hook in `.claude/settings.json` needs `jq` on `PATH` or in mise's global config (`mise use -g jq`): it reads no project's mise config, so the `jq` above does not serve it.
 
 Commit messages follow [Conventional Commits](https://www.conventionalcommits.org); the `commit-msg` hook checks them with cocogitto.
