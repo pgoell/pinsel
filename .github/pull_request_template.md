@@ -2,6 +2,12 @@
 
 Closes #
 
+## Changes
+
+<!-- Each change that needs explaining: a short excerpt of the code, why it
+looks that way, and a link to the docs, spec or issue it follows. The
+explanation goes here, not in code comments. Leave out what the code shows. -->
+
 ## Testing
 
 <!-- The tests or scripted runs that prove each change. Name them. -->

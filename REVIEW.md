@@ -36,6 +36,10 @@ it, so the author can check it:
   code belongs there.
 - A file cut at a line count to fit the size limit: name the commit that cut it.
 - A rule of `.claude/CLAUDE.md` broken. Quote the rule.
+- An explanation in the wrong place: a comment that restates the code, narrates
+  the change or tells its history (name the line, and say whether to delete it
+  or move its reason to the PR body), or a change the code does not explain
+  whose PR body gives no excerpt and reason (name the change).
 
 Taste with no rule behind it is not a finding.
 
