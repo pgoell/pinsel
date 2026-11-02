@@ -8,8 +8,8 @@ Canvas::Canvas(QWidget* parent) : QWidget(parent) {}
 
 void Canvas::paintEvent(QPaintEvent* /*event*/) {
   QPainter painter(this);
-  painter.fillRect(rect(), palette().dark());
-  painter.setPen(palette().window().color());
+  painter.fillRect(rect(), QColor(80, 80, 80));
+  painter.setPen(Qt::white);
   painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("Canvas (milestone 1)"));
 }
 
