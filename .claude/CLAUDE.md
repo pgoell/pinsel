@@ -38,6 +38,11 @@ mise run check-commits  # cocogitto on unpushed commits
 - At most about 7 entries per folder; above that, group by concept into a subfolder with one entry point. `scripts/check-fan-out` enforces it, with `.fan-out-baseline` for accepted overages and `.fan-out-excludes` for folders that are lists by design.
 - No file passes 5000 tokens (bytes/4); `scripts/check-file-size` enforces it. A Claude Code hook in `.claude/settings.json` runs both checks on each edit. The hook needs `jq` on `PATH` or in mise's global config (`mise use -g jq`), since it reads no project's mise config.
 
+## Comments and pull requests
+
+- Names and structure explain the code. A comment says only what the code cannot: a limit from outside it (a spec, a hardware or library quirk) or a reason that would surprise a reader. No comment restates the code, narrates the change or tells its history.
+- The pull request explains the change. Under "Changes" in its body, show each change that needs explaining as a short excerpt of the code, say why it looks that way, and link the docs, spec or issue it follows.
+
 ## Conventions
 
 - Conventional Commits (`feat:`, `fix:`, `chore:` ...). The `commit-msg` hook rejects anything else.
