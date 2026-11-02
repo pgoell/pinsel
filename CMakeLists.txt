@@ -61,7 +61,12 @@ if(BUILD_TESTING)
            COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080)
   add_test(NAME screenshot_4k
            COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080)
-  set_tests_properties(screenshot_4k PROPERTIES ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
+  # Pin the scale so the screen's own DPI never changes the size. Help goes to the
+  # console, not a message box that would hang the test on Windows.
+  set_property(TEST screenshot_1080p screenshot_4k PROPERTY ENVIRONMENT_MODIFICATION
+               QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
+  set_property(TEST screenshot_1080p APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
+  set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
   # Windows draws with its native platform to show the real style; offscreen has
   # no fonts there.
   if(NOT WIN32)
