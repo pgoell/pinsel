@@ -1,5 +1,8 @@
 # Every finding fails the lint. Turn a check off here, with the reason, rather
 # than with NOLINT in the code.
+#
+# cppcoreguidelines-owning-memory is off: Qt widgets are created with `new` and
+# owned by their parent, which deletes them.
 Checks: >
   bugprone-*,
   clang-analyzer-*,
@@ -10,7 +13,8 @@ Checks: >
   -modernize-use-trailing-return-type,
   -readability-identifier-length,
   -cppcoreguidelines-avoid-magic-numbers,
-  -readability-magic-numbers
+  -readability-magic-numbers,
+  -cppcoreguidelines-owning-memory
 WarningsAsErrors: "*"
 HeaderFilterRegex: "/(src|tests)/"
 CheckOptions:

@@ -29,7 +29,7 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
-qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp)
+qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/canvas/canvas.cpp)
 target_link_libraries(pinsel PRIVATE pinsel-lib Qt6::Widgets)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
