@@ -8,9 +8,9 @@ Canvas::Canvas(QWidget* parent) : QWidget(parent) {}
 
 void Canvas::paintEvent(QPaintEvent* /*event*/) {
   QPainter painter(this);
-  painter.fillRect(rect(), QColor(80, 80, 80));
-  painter.setPen(Qt::white);
-  painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("Canvas (milestone 1)"));
+  painter.fillRect(rect(), QColor(27, 27, 27));
+  painter.setPen(QColor(128, 128, 128));
+  painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("Open an image  (Ctrl+O)"));
 }
 
 }  // namespace pinsel

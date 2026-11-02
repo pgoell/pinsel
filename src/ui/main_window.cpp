@@ -4,18 +4,51 @@
 #include <QApplication>
 #include <QDockWidget>
 #include <QFormLayout>
+#include <QHBoxLayout>
+#include <QIcon>
 #include <QKeySequence>
 #include <QListWidget>
 #include <QMenuBar>
 #include <QSlider>
-#include <QStatusBar>
+#include <QSpinBox>
 #include <QToolBar>
 #include <array>
-#include <utility>
+#include <tuple>
 
 #include "canvas/canvas.hpp"
 
 namespace pinsel {
+
+namespace {
+
+struct Range {
+  int min;
+  int max;
+  int value;
+};
+
+// A slider with a number field beside it, kept in step both ways.
+void addSliderRow(QFormLayout* form, const QString& label, Range range, const QString& suffix) {
+  auto* row = new QWidget(form->parentWidget());
+  auto* layout = new QHBoxLayout(row);
+  layout->setContentsMargins(0, 0, 0, 0);
+  auto* slider = new QSlider(Qt::Horizontal, row);
+  auto* field = new QSpinBox(row);
+  slider->setRange(range.min, range.max);
+  field->setRange(range.min, range.max);
+  field->setSuffix(suffix);
+  field->setButtonSymbols(QAbstractSpinBox::NoButtons);
+  field->setAlignment(Qt::AlignRight);
+  field->setFixedWidth(64);
+  QObject::connect(slider, &QSlider::valueChanged, field, &QSpinBox::setValue);
+  QObject::connect(field, &QSpinBox::valueChanged, slider, &QSlider::setValue);
+  slider->setValue(range.value);
+  layout->addWidget(slider, 1);
+  layout->addWidget(field);
+  form->addRow(label, row);
+}
+
+}  // namespace
 
 MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   setWindowTitle(QApplication::applicationName());
@@ -24,7 +57,6 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
   addMenus();
   addTools();
   addPanels();
-  statusBar()->showMessage(QStringLiteral("No image open"));
 }
 
 void MainWindow::addMenus() {
@@ -50,18 +82,24 @@ void MainWindow::addMenus() {
 
 void MainWindow::addTools() {
   auto* tools = new QToolBar(QStringLiteral("Tools"), this);
-  addToolBar(Qt::LeftToolBarArea, tools);
+  tools->setObjectName(QStringLiteral("tools"));
   tools->setMovable(false);
+  tools->setIconSize(QSize(20, 20));
+  addToolBar(Qt::LeftToolBarArea, tools);
   auto* group = new QActionGroup(tools);
   const std::array entries{
-      std::pair{"Brush", Qt::Key_B},
-      std::pair{"Eraser", Qt::Key_E},
-      std::pair{"Mask", Qt::Key_M},
-      std::pair{"Pan", Qt::Key_H},
+      std::tuple{"Brush", "brush", Qt::Key_B},
+      std::tuple{"Eraser", "eraser", Qt::Key_E},
+      std::tuple{"Mask", "square-dashed", Qt::Key_M},
+      std::tuple{"Pan", "hand", Qt::Key_H},
   };
-  for (const auto& [name, key] : entries) {
-    QAction* action = tools->addAction(QString::fromLatin1(name));
+  for (const auto& [name, icon, key] : entries) {
+    QAction* action =
+        tools->addAction(QIcon(QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(icon))),
+                         QString::fromLatin1(name));
     action->setShortcut(key);
+    action->setToolTip(
+        QStringLiteral("%1 (%2)").arg(QString::fromLatin1(name), QKeySequence(key).toString()));
     action->setCheckable(true);
     group->addAction(action);
   }
@@ -76,14 +114,10 @@ void MainWindow::addPanels() {
   auto* brush = new QDockWidget(QStringLiteral("Brush"), this);
   auto* settings = new QWidget(brush);
   auto* form = new QFormLayout(settings);
-  auto* size = new QSlider(Qt::Horizontal, settings);
-  size->setRange(1, 500);
-  size->setValue(40);
-  form->addRow(QStringLiteral("Size"), size);
-  auto* opacity = new QSlider(Qt::Horizontal, settings);
-  opacity->setRange(0, 100);
-  opacity->setValue(100);
-  form->addRow(QStringLiteral("Opacity"), opacity);
+  addSliderRow(form, QStringLiteral("Size"), {.min = 1, .max = 500, .value = 40},
+               QStringLiteral(" px"));
+  addSliderRow(form, QStringLiteral("Opacity"), {.min = 0, .max = 100, .value = 100},
+               QStringLiteral(" %"));
   brush->setWidget(settings);
   addDockWidget(Qt::RightDockWidgetArea, brush);
 

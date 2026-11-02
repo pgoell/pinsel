@@ -52,3 +52,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 ## License
 
 GPL-3.0, see `LICENSE`. Code read in Krita or ComfyUI (both GPL-3.0) may inform this code; stable-diffusion.cpp is MIT.
+
+## Credits
+
+Tool icons in `resources/icons/` come from [Lucide](https://lucide.dev) 1.66.0 under the ISC licence (`resources/icons/LICENSE`), with the stroke colour changed to suit the dark theme.
