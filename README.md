@@ -33,7 +33,7 @@ mise run lint     # clang-format + clang-tidy
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
-Windows is the main platform, and CI runs the tests there only. Build with Clang (`$env:CXX = 'clang++'` in PowerShell, `set CXX=clang++` in cmd, before `mise run install`) from LLVM or Visual Studio's Clang tools. The tests need AddressSanitizer's runtime DLL on `PATH`: add the folder that `clang++ -print-resource-dir` prints, plus `\lib\windows`. On Windows, UndefinedBehaviorSanitizer runs in trap mode: a fault fails the test with SEH exception 0xc000001d and no source line; rerun it under a debugger with `--gtest_catch_exceptions=0` to find the line.
+Windows is the main platform, and CI runs the tests there only. `lint`, `fmt` and `check-commits` run in bash, so keep Git for Windows' `bin` folder on `PATH`. Build with Clang (`$env:CXX = 'clang++'` in PowerShell, `set CXX=clang++` in cmd, before `mise run install`) from LLVM or Visual Studio's Clang tools. The tests need AddressSanitizer's runtime DLL on `PATH`: add the folder that `clang++ -print-resource-dir` prints, plus `\lib\windows`. On Windows, UndefinedBehaviorSanitizer runs in trap mode: a fault fails the test with SEH exception 0xc000001d and no source line; rerun it under a debugger with `--gtest_catch_exceptions=0` to find the line.
 
 The Claude Code hook in `.claude/settings.json` needs `jq` on `PATH` or in mise's global config (`mise use -g jq`): it reads no project's mise config, so the `jq` above does not serve it.
 
