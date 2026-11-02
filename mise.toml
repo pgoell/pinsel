@@ -40,6 +40,7 @@ run = "ctest --preset dev"
 
 # clang-tidy reads build/dev/compile_commands.json, which the configure writes.
 [tasks.lint]
+shell = "bash -c"
 description = "Format-check and clang-tidy"
 run = [
   "git ls-files -z -co --exclude-standard '*.cpp' '*.hpp' | xargs -0 -r clang-format --dry-run --Werror",
@@ -48,12 +49,14 @@ run = [
 ]
 
 [tasks.fmt]
+shell = "bash -c"
 description = "Auto-format"
 run = "git ls-files -z -co --exclude-standard '*.cpp' '*.hpp' | xargs -0 -r clang-format -i"
 
 # ─── Commits ────────────────────────────────────────────────────────────────
 
 [tasks.check-commits]
+shell = "bash -c"
 description = "Verify commits since origin/master are conventional"
 # Before the first push there is no origin/master: check the whole history.
 run = '''

@@ -6,7 +6,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
-if(SANITIZE)
+if(SANITIZE AND WIN32)
+  # AddressSanitizer on Windows needs the release C runtime. UndefinedBehaviorSanitizer
+  # runs in trap mode there: it crashes on the first fault and needs no runtime library.
+  set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreadedDLL)
+  add_compile_options(-fsanitize=address,undefined -fsanitize-trap=undefined -fno-omit-frame-pointer)
+  add_link_options(-fsanitize=address,undefined)
+elseif(SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
   add_link_options(-fsanitize=address,undefined)
 endif()
@@ -32,6 +38,8 @@ if(BUILD_TESTING)
     URL_HASH SHA256=6e3191c1455468b3fc35a417fb565c1c5071aee1b7e7f85e30cf48a98d37d8b5
   )
   set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+  # Use the same C runtime as pinsel on Windows.
+  set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
   add_executable(tests tests/test_project.cpp)
