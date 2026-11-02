@@ -1,9 +1,12 @@
 # C++
 build/
+.qt/
+aqtinstall.log
 .cache/
 
-# Secrets
+# Secrets and machine-local settings
 .env
+mise.local.toml
 
 # Editors / OS
 .DS_Store
