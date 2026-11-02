@@ -9,7 +9,7 @@ Canvas::Canvas(QWidget* parent) : QWidget(parent) {}
 void Canvas::paintEvent(QPaintEvent* /*event*/) {
   QPainter painter(this);
   painter.fillRect(rect(), palette().dark());
-  painter.setPen(palette().brightText().color());
+  painter.setPen(palette().window().color());
   painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("Canvas (milestone 1)"));
 }
 

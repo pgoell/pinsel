@@ -41,16 +41,15 @@ void MainWindow::addMenus() {
   edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo)->setEnabled(false);
 
   view_menu_ = menuBar()->addMenu(QStringLiteral("&View"));
-  QMenu* view = view_menu_;
-  view->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn)->setEnabled(false);
-  view->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut)->setEnabled(false);
-  view->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0))
+  view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn)->setEnabled(false);
+  view_menu_->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut)->setEnabled(false);
+  view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0))
       ->setEnabled(false);
-  view->addSeparator();
+  view_menu_->addSeparator();
 }
 
 void MainWindow::addTools() {
-  QToolBar* tools = addToolBar(QStringLiteral("Tools"));
+  auto* tools = new QToolBar(QStringLiteral("Tools"), this);
   addToolBar(Qt::LeftToolBarArea, tools);
   tools->setMovable(false);
   auto* group = new QActionGroup(tools);
