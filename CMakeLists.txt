@@ -1,4 +1,10 @@
 cmake_minimum_required(VERSION 3.28)
+# vcpkg's default Windows triplet builds DLLs and copies the debug ones beside a
+# Debug build, but the sanitizer build below runs on the release C runtime. Static
+# libraries on the release runtime DLL avoid mixing the two.
+if(CMAKE_HOST_WIN32 AND NOT DEFINED VCPKG_TARGET_TRIPLET)
+  set(VCPKG_TARGET_TRIPLET x64-windows-static-md)
+endif()
 project(pinsel LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
