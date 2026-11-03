@@ -1,6 +1,7 @@
 # C++
 build/
 .qt/
+.vcpkg/
 aqtinstall.log
 .cache/
 

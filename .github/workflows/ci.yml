@@ -26,6 +26,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq libgl-dev
           mise run install-qt
+      - name: vcpkg
+        run: mise run install-vcpkg
       - name: clang-format and clang-tidy
         run: mise run lint
       - name: File size
@@ -45,6 +47,8 @@ jobs:
           install_args: cmake ninja uv pipx:aqtinstall
       - name: Qt
         run: mise run install-qt
+      - name: vcpkg
+        run: mise run install-vcpkg
       - name: Put the sanitizer runtime on PATH
         shell: pwsh
         run: Join-Path (clang++ -print-resource-dir) 'lib\windows' | Add-Content $env:GITHUB_PATH
