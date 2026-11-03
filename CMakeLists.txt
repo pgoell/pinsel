@@ -19,9 +19,9 @@ if(SANITIZE AND WIN32)
   # Qt's debug DLLs use the debug C runtime, so link its release DLLs.
   set(CMAKE_MAP_IMPORTED_CONFIG_DEBUG Release)
   add_compile_options(-fsanitize=address,undefined -fsanitize-trap=undefined -fno-omit-frame-pointer)
-  # Under AddressSanitizer the MSVC STL marks string and vector objects, and the
+  # Under AddressSanitizer the MSVC STL marks its containers in each object, and the
   # linker refuses to mix them with vcpkg's libraries, which build without it.
-  add_compile_definitions(_DISABLE_STRING_ANNOTATION _DISABLE_VECTOR_ANNOTATION)
+  add_compile_definitions(_DISABLE_STL_ANNOTATION)
   add_link_options(-fsanitize=address,undefined)
 elseif(SANITIZE)
   add_compile_options(-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer)
