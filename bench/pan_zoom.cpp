@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <tracy/Tracy.hpp>
 #include <vector>
 
 #include "canvas/canvas.hpp"
@@ -44,6 +45,7 @@ void measureFrames(benchmark::State& state, pinsel::Canvas& canvas,
     const std::chrono::duration<double> took = std::chrono::steady_clock::now() - start;
     state.SetIterationTime(took.count());
     seconds.push_back(took.count());
+    FrameMark;
   }
   std::ranges::sort(seconds);
   const auto p99 = static_cast<std::size_t>(static_cast<double>(seconds.size() - 1) * 0.99);

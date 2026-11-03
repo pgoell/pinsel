@@ -32,6 +32,7 @@ mise run install  # git hooks + configure (fetches GoogleTest)
 mise run test     # Debug build with sanitizers, then ctest
 mise run lint     # clang-format + clang-tidy
 mise run bench    # Release build, then the pan and zoom frame times
+mise run profile  # Release build with Tracy, then start pinsel
 ```
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
@@ -46,6 +47,8 @@ CMAKE_PREFIX_PATH = "<the folder install-qt printed>"
 To share one vcpkg between checkouts, set `VCPKG_ROOT` there too; `install-vcpkg` fills that folder.
 
 On Linux, Qt also needs the OpenGL headers (`libgl-dev` on Ubuntu). On Windows, put Qt's `bin` folder on `PATH` so the tests find its DLLs.
+
+`mise run profile` sends timings to [Tracy](https://github.com/wolfpld/tracy)'s viewer. The viewer must match the client in `vcpkg.json`, 0.14.1: on Windows, take `windows-0.14.1.zip` from Tracy's releases.
 
 Windows is the main platform, and CI runs the tests there only. `lint`, `fmt` and `check-commits` run in bash, so put Git for Windows' `bin` folder on `PATH` ahead of `C:\Windows\System32`, where WSL's `bash.exe` lives; `where bash` must list Git's copy first. Build with Clang (`$env:CXX = 'clang++'` in PowerShell, `set CXX=clang++` in cmd, before `mise run install`) from LLVM or Visual Studio's Clang tools. The tests need AddressSanitizer's runtime DLL on `PATH`: add the folder that `clang++ -print-resource-dir` prints, plus `\lib\windows`. On Windows, UndefinedBehaviorSanitizer runs in trap mode: a fault fails the test with SEH exception 0xc000001d and no source line; rerun it under a debugger with `--gtest_catch_exceptions=0` to find the line.
 

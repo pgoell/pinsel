@@ -12,6 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 option(SANITIZE "Build with AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+option(PINSEL_TRACY "Send profiling data to the Tracy profiler" OFF)
 if(SANITIZE AND WIN32)
   # AddressSanitizer on Windows needs the release C runtime. UndefinedBehaviorSanitizer
   # runs in trap mode there: it crashes on the first fault and needs no runtime library.
@@ -32,6 +33,7 @@ endif()
 find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg)
 qt_standard_project_setup()
 find_package(benchmark CONFIG REQUIRED)
+find_package(Tracy CONFIG REQUIRED)
 
 # Warnings as errors for this project's targets only, not for GoogleTest.
 set(WARNINGS -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
@@ -43,6 +45,14 @@ target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 add_library(pinsel-canvas src/canvas/canvas.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
 target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets)
+# The Tracy client defines TRACY_ENABLE for everything that links it. Without it,
+# Tracy's header turns every macro into nothing, so code can mark zones in every build.
+if(PINSEL_TRACY)
+  target_link_libraries(pinsel-canvas PUBLIC Tracy::TracyClient)
+else()
+  target_include_directories(
+    pinsel-canvas SYSTEM PUBLIC $<TARGET_PROPERTY:Tracy::TracyClient,INTERFACE_INCLUDE_DIRECTORIES>)
+endif()
 target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp)
