@@ -48,14 +48,14 @@ fi
 '''
 
 # Checks vcpkg out at the builtin-baseline in vcpkg.json, so the port versions
-# match the manifest, and builds its tool. Skips a vcpkg that is already there.
+# match the manifest, and builds its tool. Skips a vcpkg already at that commit.
 [tasks.install-vcpkg]
 description = "Download vcpkg into VCPKG_ROOT"
 shell = "bash -c"
 run = '''
 set -eu
-[ -e "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ] && exit 0
 baseline=$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg.json)
+[ "$(git -C "$VCPKG_ROOT" rev-parse -q --verify HEAD 2>/dev/null)" = "$baseline" ] && exit 0
 git init -q "$VCPKG_ROOT"
 cd "$VCPKG_ROOT"
 git fetch -q --depth 1 https://github.com/microsoft/vcpkg.git "$baseline"
