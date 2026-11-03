@@ -22,6 +22,7 @@ endif()
 # Svg is never linked, but its icon plugin draws the tool icons; without it they stay blank.
 find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg)
 qt_standard_project_setup()
+find_package(benchmark CONFIG REQUIRED)
 
 # Warnings as errors for this project's targets only, not for GoogleTest.
 set(WARNINGS -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
@@ -30,12 +31,20 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
-qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp
-                  src/canvas/canvas.cpp)
+add_library(pinsel-canvas src/canvas/canvas.cpp)
+target_include_directories(pinsel-canvas PUBLIC src)
+target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets)
+target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
+
+qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
-target_link_libraries(pinsel PRIVATE pinsel-lib Qt6::Widgets)
+target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
+
+add_executable(bench bench/pan_zoom.cpp)
+target_link_libraries(bench PRIVATE pinsel-canvas benchmark::benchmark)
+target_compile_options(bench PRIVATE ${WARNINGS})
 
 include(CTest)
 if(BUILD_TESTING)
@@ -57,6 +66,9 @@ if(BUILD_TESTING)
   include(GoogleTest)
   gtest_discover_tests(tests)
 
+  # One pass of each benchmark, so the harness keeps working under the sanitizers.
+  add_test(NAME bench_smoke COMMAND bench --benchmark_min_time=1x)
+
   # CI posts every PNG these write to the pull request: a 1080p screen, and a 4K
   # screen at 200% scaling.
   set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
@@ -74,7 +86,7 @@ if(BUILD_TESTING)
   # Windows draws with its native platform to show the real style; offscreen has
   # no fonts there.
   if(NOT WIN32)
-    set_property(TEST screenshot_1080p screenshot_4k APPEND
+    set_property(TEST screenshot_1080p screenshot_4k bench_smoke APPEND
                  PROPERTY ENVIRONMENT_MODIFICATION QT_QPA_PLATFORM=set:offscreen)
   endif()
 endif()

@@ -13,6 +13,10 @@ cocogitto = "latest"
 jq        = "latest"
 "pipx:aqtinstall" = "3.3.0"
 
+# Set VCPKG_ROOT in mise.local.toml to share one vcpkg between checkouts.
+[env]
+VCPKG_ROOT = "{{config_root}}/.vcpkg"
+
 # ─── Bootstrap ──────────────────────────────────────────────────────────────
 
 [tasks.install]
@@ -43,6 +47,25 @@ if [ -n "${GITHUB_ENV:-}" ]; then
 fi
 '''
 
+# Checks vcpkg out at the builtin-baseline in vcpkg.json, so the port versions
+# match the manifest, and builds its tool. Skips a vcpkg that is already there.
+[tasks.install-vcpkg]
+description = "Download vcpkg into VCPKG_ROOT"
+shell = "bash -c"
+run = '''
+set -eu
+[ -e "$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" ] && exit 0
+baseline=$(sed -n 's/.*"builtin-baseline": *"\([0-9a-f]*\)".*/\1/p' vcpkg.json)
+git init -q "$VCPKG_ROOT"
+cd "$VCPKG_ROOT"
+git fetch -q --depth 1 https://github.com/microsoft/vcpkg.git "$baseline"
+git checkout -q FETCH_HEAD
+case "$(uname -s)" in
+  Linux | Darwin) ./bootstrap-vcpkg.sh -disableMetrics ;;
+  *) ./bootstrap-vcpkg.bat -disableMetrics ;;
+esac
+'''
+
 # ─── Build & test ───────────────────────────────────────────────────────────
 
 # The dev preset builds Debug with AddressSanitizer and UndefinedBehaviorSanitizer.
@@ -57,6 +80,16 @@ run = [
 description = "Run tests under the sanitizers"
 depends = ["build"]
 run = "ctest --preset dev"
+
+# Benchmarks only mean something in an optimized build without sanitizers.
+[tasks.bench]
+description = "Build the release preset and run the benchmarks"
+shell = "bash -c"
+run = [
+  "cmake --preset release",
+  "cmake --build --preset release --target bench",
+  "build/release/bench",
+]
 
 # ─── Lint & format ──────────────────────────────────────────────────────────
 

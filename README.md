@@ -27,9 +27,11 @@ Needs [mise](https://mise.jdx.dev).
 ```sh
 mise install      # cmake, ninja, clang-format, clang-tidy, lefthook, cocogitto, jq, aqtinstall
 mise run install-qt  # Qt into .qt/; set CMAKE_PREFIX_PATH (below) to the folder it prints
+mise run install-vcpkg  # vcpkg into .vcpkg/, for Google Benchmark
 mise run install  # git hooks + configure (fetches GoogleTest)
 mise run test     # Debug build with sanitizers, then ctest
 mise run lint     # clang-format + clang-tidy
+mise run bench    # Release build, then the pan and zoom frame times
 ```
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
@@ -40,6 +42,8 @@ Qt 6.10 or newer, with the Qt SVG module, comes from `mise run install-qt` or Qt
 [env]
 CMAKE_PREFIX_PATH = "<the folder install-qt printed>"
 ```
+
+To share one vcpkg between checkouts, set `VCPKG_ROOT` there too; `install-vcpkg` fills that folder.
 
 On Linux, Qt also needs the OpenGL headers (`libgl-dev` on Ubuntu). On Windows, put Qt's `bin` folder on `PATH` so the tests find its DLLs.
 
