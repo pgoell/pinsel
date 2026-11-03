@@ -14,7 +14,8 @@ When a task touches both, write the agent part and leave the owner part as a stu
 ## Layout
 
 - `src/`: the library (`project.hpp`, `project.cpp`) and the executable (`main.cpp`)
-- `src/ui/`: Qt 6 Widgets: the main window and its panels
+- `src/ui/`: Qt 6 Widgets: the main window, its menus, tool bar and panels
+- `src/canvas/`: owner-only; a placeholder widget until milestone 1
 - `tests/`: GoogleTest, run by ctest
 - `CMakePresets.json`: `dev` (Debug, AddressSanitizer and UndefinedBehaviorSanitizer, the default for every task) and `release`
 
@@ -34,7 +35,7 @@ mise run check-commits  # cocogitto on unpushed commits
 
 - Build deep modules: a small interface over much hidden work. No pass-through wrappers, barrel files or `utils` grab bags.
 - A module's public names live in one header. Other modules include that header and reach no deeper.
-- Modern C++20: RAII, `std::unique_ptr` over `new`, no raw owning pointers. A sanitizer finding is a bug, never noise.
+- Modern C++20: RAII, `std::unique_ptr` over `new`, no raw owning pointers, except Qt widgets, which `new` creates and their parent deletes. A sanitizer finding is a bug, never noise.
 - `.clang-tidy` turns every finding into an error. Turn a check off there, with the reason, not with `NOLINT` in the code.
 - At most about 7 entries per folder; above that, group by concept into a subfolder with one entry point. `scripts/check-fan-out` enforces it, with `.fan-out-baseline` for accepted overages and `.fan-out-excludes` for folders that are lists by design.
 - No file passes 5000 tokens (bytes/4); `scripts/check-file-size` enforces it. A Claude Code hook in `.claude/settings.json` runs both checks on each edit. The hook needs `jq` on `PATH` or in mise's global config (`mise use -g jq`), since it reads no project's mise config.

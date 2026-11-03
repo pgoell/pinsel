@@ -6,9 +6,11 @@
 
 #include "project.hpp"
 #include "ui/main_window.hpp"
+#include "ui/theme.hpp"
 
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
+  pinsel::applyTheme(app);
   QApplication::setApplicationName(QString::fromStdString(std::string(pinsel::name())));
 
   QCommandLineParser parser;

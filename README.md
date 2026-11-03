@@ -34,7 +34,7 @@ mise run lint     # clang-format + clang-tidy
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
-Qt 6.10 or newer comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
+Qt 6.10 or newer, with the Qt SVG module, comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
 
 ```toml
 [env]
@@ -52,3 +52,7 @@ Commit messages follow [Conventional Commits](https://www.conventionalcommits.or
 ## License
 
 GPL-3.0, see `LICENSE`. Code read in Krita or ComfyUI (both GPL-3.0) may inform this code; stable-diffusion.cpp is MIT.
+
+## Credits
+
+Tool icons in `resources/icons/` come from [Lucide](https://lucide.dev) 1.66.0 under the ISC licence (`resources/icons/LICENSE`), with the stroke colour changed to suit the dark theme.
