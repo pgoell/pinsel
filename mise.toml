@@ -91,7 +91,7 @@ run = [
   "build/release/bench",
 ]
 
-# Start Tracy's viewer first, or connect it while pinsel runs.
+# Tracy records only while its viewer is connected.
 [tasks.profile]
 description = "Build the profile preset and start pinsel for Tracy"
 shell = "bash -c"

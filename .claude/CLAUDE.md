@@ -17,7 +17,7 @@ When a task touches both, write the agent part and leave the owner part as a stu
 - `src/ui/`: Qt 6 Widgets: the main window, its menus, tool bar and panels
 - `src/canvas/`: owner-only; a placeholder widget until milestone 1
 - `tests/`: GoogleTest, run by ctest
-- `CMakePresets.json`: `dev` (Debug, AddressSanitizer and UndefinedBehaviorSanitizer, the default for every task) and `release`
+- `CMakePresets.json`: `dev` (Debug, AddressSanitizer and UndefinedBehaviorSanitizer, the default for every task), `release`, and `profile` (optimized with debug info, Tracy on)
 
 ## Commands
 

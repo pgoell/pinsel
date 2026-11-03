@@ -1,4 +1,7 @@
 {
-  "dependencies": ["benchmark", "tracy"],
+  "dependencies": [
+    "benchmark",
+    { "name": "tracy", "features": ["on-demand"] }
+  ],
   "builtin-baseline": "9eec002df1cd109f8f104cd966a763daf9751489"
 }
