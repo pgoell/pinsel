@@ -68,7 +68,11 @@ Loaded load(const QString& path) {
   if (image.isNull()) {
     return {.image = {}, .error = reader.errorString()};
   }
-  return {.image = image.convertToFormat(Canvas::kImageFormat), .error = {}};
+  QImage converted = image.convertToFormat(Canvas::kImageFormat);
+  if (converted.isNull()) {
+    return {.image = {}, .error = QStringLiteral("Not enough memory to convert the image")};
+  }
+  return {.image = std::move(converted), .error = {}};
 }
 
 }  // namespace
