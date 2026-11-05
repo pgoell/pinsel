@@ -21,7 +21,9 @@ void View::fit() {
   if (image_.isEmpty() || viewport_.isEmpty()) {
     return;
   }
-  scale_ = std::min(viewport_.width() / image_.width(), viewport_.height() / image_.height());
+  scale_ =
+      std::clamp(std::min(viewport_.width() / image_.width(), viewport_.height() / image_.height()),
+                 kMinScale, kMaxScale);
   const QSizeF shown = QSizeF(image_) * scale_;
   offset_ = QPointF((viewport_.width() - shown.width()) / 2.0,
                     (viewport_.height() - shown.height()) / 2.0);

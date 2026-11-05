@@ -9,7 +9,8 @@ namespace pinsel {
 
 // Where the image sits in the widget: a scale and the widget position of the
 // image's top left corner. Until the user pans or zooms, the view keeps the
-// image fitted to the widget, also when the widget resizes.
+// image fitted to the widget, also when the widget resizes. Fitting stays in the
+// scale range too, so a tiny image is not blown up past it.
 class View {
  public:
   static constexpr double kMinScale = 1.0 / 32.0;

@@ -49,6 +49,13 @@ TEST(View, ZoomStopsAtTheScaleRange) {
   EXPECT_DOUBLE_EQ(view.scale(), View::kMinScale);
 }
 
+TEST(View, FitStaysInTheScaleRangeSoZoomInNeverZoomsOut) {
+  View view = fitted(QSize(4, 4), QSizeF(1000, 1000));
+  EXPECT_DOUBLE_EQ(view.scale(), View::kMaxScale);
+  view.zoomAt(QPointF(), 2.0);
+  EXPECT_DOUBLE_EQ(view.scale(), View::kMaxScale);
+}
+
 TEST(View, VisibleRectIsTheViewportInImagePixels) {
   View view = fitted(QSize(100, 100), QSizeF(100, 100));
   view.zoomAt(QPointF(), 2.0);

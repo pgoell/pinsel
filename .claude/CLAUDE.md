@@ -6,7 +6,7 @@ Native image editor for generating images and local edits, with its own GPU kern
 
 - `src/`: the library (`project.hpp`, `project.cpp`) and the executable (`main.cpp`)
 - `src/ui/`: Qt 6 Widgets: the main window, its menus, tool bar and panels
-- `src/canvas/`: the canvas; a placeholder widget until milestone 1
+- `src/canvas/`: the canvas, a `QRhiWidget` that draws the image as GPU tiles, and `View`, its pan and zoom math
 - `tests/`: GoogleTest, run by ctest
 - `CMakePresets.json`: `dev` (Debug, AddressSanitizer and UndefinedBehaviorSanitizer, the default for every task), `release`, and `profile` (optimized with debug info, Tracy on)
 
