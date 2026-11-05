@@ -52,7 +52,7 @@ void measureFrames(benchmark::State& state, pinsel::Canvas& canvas,
   state.counters["p99_ms"] = seconds.at(p99) * 1000.0;
 }
 
-// Owner: open a 3840x2160 test image in the canvas here, once it can hold one, so
+// Open a 3840x2160 test image in the canvas here, once it can hold one, so
 // the frames draw what milestone 1 promises. Until then they time the placeholder.
 void openTestImage(pinsel::Canvas& /*canvas*/) {}
 

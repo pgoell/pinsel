@@ -9,7 +9,6 @@ before it reads the diff. Keep it short: every line costs a review.
 - Work on the UI thread that blocks it: inference, file IO or a GPU sync in the render loop.
 - GPU or host memory that grows per edit: a leak shows up only after many strokes, and 8 GB VRAM leaves no room.
 - Undefined behaviour: anything a sanitizer would flag, even if the tests pass.
-- Agent-written code in a part `.claude/CLAUDE.md` reserves for the owner.
 - A doc that says something the code no longer does.
 
 ## Security model

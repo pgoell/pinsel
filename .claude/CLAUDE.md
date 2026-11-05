@@ -1,21 +1,12 @@
 # pinsel: project instructions
 
-Native image editor for generating images and local edits, built by hand down to its own GPU kernels.
-
-## Who writes what
-
-This is a learning project. The owner writes the core by hand; agents must not write it, even when asked to "just fix it". Explain, point at the bug, or review instead.
-
-- **Owner only:** canvas and tiling, brush and mask, compositing and blend shaders, the inpaint crop-and-blend, the inference pipeline and every GPU kernel.
-- **Agents may write:** UI boilerplate, file loading and saving, settings, build files, CI, tests and benchmarks.
-
-When a task touches both, write the agent part and leave the owner part as a stub with a comment saying what it must do.
+Native image editor for generating images and local edits, with its own GPU kernels.
 
 ## Layout
 
 - `src/`: the library (`project.hpp`, `project.cpp`) and the executable (`main.cpp`)
 - `src/ui/`: Qt 6 Widgets: the main window, its menus, tool bar and panels
-- `src/canvas/`: owner-only; a placeholder widget until milestone 1
+- `src/canvas/`: the canvas; a placeholder widget until milestone 1
 - `tests/`: GoogleTest, run by ctest
 - `CMakePresets.json`: `dev` (Debug, AddressSanitizer and UndefinedBehaviorSanitizer, the default for every task), `release`, and `profile` (optimized with debug info, Tracy on)
 

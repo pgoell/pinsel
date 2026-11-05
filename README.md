@@ -1,8 +1,8 @@
 # pinsel
 
-Native image editor for generating images and local edits, built by hand down to its own GPU kernels.
+Native image editor for generating images and local edits, with its own GPU kernels.
 
-Paint a mask, let go of the brush, and see the edit at once. Generation and local edits that feel like Photoshop or Krita, not like a web form. A learning project too: I write the core myself, from the GPU canvas down to the CUDA kernels.
+Paint a mask, let go of the brush, and see the edit at once. Generation and local edits that feel like Photoshop or Krita, not like a web form. A learning project too, from the GPU canvas down to the CUDA kernels.
 
 ## Scope
 
