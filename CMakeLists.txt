@@ -33,7 +33,7 @@ endif()
 # Svg is never linked, but its icon plugin draws the tool icons; without it they stay blank.
 # QRhi, which the canvas draws with, is in Qt's private Gui module, which warns on use.
 set(QT_NO_PRIVATE_MODULE_WARNING ON)
-find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg GuiPrivate ShaderTools)
+find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg Concurrent GuiPrivate ShaderTools)
 qt_standard_project_setup()
 find_package(benchmark CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
@@ -63,7 +63,7 @@ target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
-target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas)
+target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas Qt6::Concurrent)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
 add_executable(bench bench/pan_zoom.cpp)

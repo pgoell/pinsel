@@ -20,6 +20,9 @@ class Canvas : public QRhiWidget {
   Canvas(Canvas&&) = delete;
   Canvas& operator=(Canvas&&) = delete;
 
+  // The texture format. setImage converts any other format, on the calling thread.
+  static constexpr QImage::Format kImageFormat = QImage::Format_RGBA8888_Premultiplied;
+
   // QRhiWidget's render(QRhiCommandBuffer*) hides these.
   using QWidget::render;
 

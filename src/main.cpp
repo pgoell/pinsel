@@ -38,22 +38,25 @@ int main(int argc, char** argv) {
     }
     window.resize(width, height);
   }
-  if (parser.isSet(open)) {
-    const QString error = window.openImage(parser.value(open));
-    if (!error.isEmpty()) {
-      qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
-      return 1;
-    }
-  }
   if (parser.isSet(screenshot)) {
     // Lays the window out at any size, unclipped by the screen, and never shows it.
     window.setAttribute(Qt::WA_DontShowOnScreen);
   }
   window.show();
-  if (parser.isSet(screenshot)) {
-    QTimer::singleShot(0, &window, [&] {
-      QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
+  const auto saveScreenshot = [&] {
+    QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
+  };
+  if (parser.isSet(open)) {
+    window.openImage(parser.value(open), [&](const QString& error) {
+      if (!error.isEmpty()) {
+        qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
+        QApplication::exit(1);
+      } else if (parser.isSet(screenshot)) {
+        saveScreenshot();
+      }
     });
+  } else if (parser.isSet(screenshot)) {
+    QTimer::singleShot(0, &window, saveScreenshot);
   }
   return QApplication::exec();
 }

@@ -5,6 +5,7 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImageReader>
@@ -15,8 +16,10 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolBar>
+#include <QtConcurrentRun>
 #include <array>
 #include <tuple>
+#include <utility>
 
 #include "canvas/canvas.hpp"
 
@@ -49,6 +52,23 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   layout->addWidget(slider, 1);
   layout->addWidget(field);
   form->addRow(label, row);
+}
+
+struct Loaded {
+  QImage image;
+  QString error;
+};
+
+// Runs on a pool thread. Converts to the canvas's format here, so setImage has
+// nothing left to convert on the UI thread.
+Loaded load(const QString& path) {
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage image = reader.read();
+  if (image.isNull()) {
+    return {.image = {}, .error = reader.errorString()};
+  }
+  return {.image = image.convertToFormat(Canvas::kImageFormat), .error = {}};
 }
 
 }  // namespace
@@ -84,16 +104,23 @@ void MainWindow::addMenus() {
   view_menu_->addSeparator();
 }
 
-QString MainWindow::openImage(const QString& path) {
-  QImageReader reader(path);
-  reader.setAutoTransform(true);
-  const QImage image = reader.read();
-  if (image.isNull()) {
-    return reader.errorString();
-  }
-  canvas_->setImage(image);
-  setWindowFilePath(path);
-  return {};
+void MainWindow::openImage(const QString& path, std::function<void(const QString& error)> done) {
+  const int id = ++latest_open_;
+  auto* watcher = new QFutureWatcher<Loaded>(this);
+  connect(watcher, &QFutureWatcher<Loaded>::finished, this,
+          [this, watcher, id, path, done = std::move(done)] {
+            const Loaded loaded = watcher->result();
+            watcher->deleteLater();
+            if (id != latest_open_) {
+              return;
+            }
+            if (!loaded.image.isNull()) {
+              canvas_->setImage(loaded.image);
+              setWindowFilePath(path);
+            }
+            done(loaded.error);
+          });
+  watcher->setFuture(QtConcurrent::run(load, path));
 }
 
 void MainWindow::chooseImage() {
@@ -107,11 +134,12 @@ void MainWindow::chooseImage() {
   if (path.isEmpty()) {
     return;
   }
-  const QString error = openImage(path);
-  if (!error.isEmpty()) {
-    QMessageBox::warning(this, QStringLiteral("Open Image"),
-                         QStringLiteral("Could not open %1: %2").arg(path, error));
-  }
+  openImage(path, [this, path](const QString& error) {
+    if (!error.isEmpty()) {
+      QMessageBox::warning(this, QStringLiteral("Open Image"),
+                           QStringLiteral("Could not open %1: %2").arg(path, error));
+    }
+  });
 }
 
 void MainWindow::addTools() {

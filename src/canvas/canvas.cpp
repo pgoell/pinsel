@@ -152,7 +152,7 @@ Canvas::~Canvas() = default;
 
 void Canvas::setImage(const QImage& image) {
   // RGBA8 textures take bytes in this order on every backend.
-  image_ = image.convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+  image_ = image.convertToFormat(kImageFormat);
   image_changed_ = true;
   view_.setViewportSize(QSizeF(size()));
   view_.setImageSize(image_.size());
