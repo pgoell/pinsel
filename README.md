@@ -37,7 +37,7 @@ mise run profile  # Optimized build with debug info and Tracy, then start pinsel
 
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
-Qt 6.10 or newer, with the Qt SVG module, comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
+Qt 6.10 or newer, with the Qt SVG and Qt Shader Tools modules, comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:
 
 ```toml
 [env]
@@ -46,7 +46,7 @@ CMAKE_PREFIX_PATH = "<the folder install-qt printed>"
 
 To share one vcpkg between checkouts, set `VCPKG_ROOT` there too; `install-vcpkg` fills that folder.
 
-On Linux, Qt also needs the OpenGL headers (`libgl-dev` on Ubuntu). On Windows, put Qt's `bin` folder on `PATH` so the tests find its DLLs.
+On Linux, Qt also needs the OpenGL and xkbcommon headers (`libgl-dev` and `libxkbcommon-dev` on Ubuntu). The tests there run on Qt's `offscreen` platform, which has no GPU, so the canvas stays blank in them; the Windows tests draw it. On Windows, put Qt's `bin` folder on `PATH` so the tests find its DLLs.
 
 `mise run profile` sends timings to [Tracy](https://github.com/wolfpld/tracy)'s viewer. The viewer must match the client's version, 0.14.1, which `builtin-baseline` in `vcpkg.json` picks: on Windows, take `windows-0.14.1.zip` from Tracy's releases. The client listens on localhost only, so run the viewer on the same machine; it records only while a viewer is connected.
 

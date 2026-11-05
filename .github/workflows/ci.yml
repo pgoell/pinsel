@@ -21,10 +21,10 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: ./.github/actions/setup-mise
-      - name: Qt and the OpenGL headers it needs
+      - name: Qt and the OpenGL and xkbcommon headers it needs
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq libgl-dev
+          sudo apt-get install -y -qq libgl-dev libxkbcommon-dev
           mise run install-qt
       - name: vcpkg
         run: mise run install-vcpkg

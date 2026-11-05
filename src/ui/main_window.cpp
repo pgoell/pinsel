@@ -3,12 +3,15 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDockWidget>
+#include <QFileDialog>
 #include <QFormLayout>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImageReader>
 #include <QKeySequence>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolBar>
@@ -50,10 +53,10 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), canvas_(new Canvas(this)) {
   setWindowTitle(QApplication::applicationName());
   resize(1280, 800);
-  setCentralWidget(new Canvas(this));
+  setCentralWidget(canvas_);
   addMenus();
   addTools();
   addPanels();
@@ -62,7 +65,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 void MainWindow::addMenus() {
   // Actions stay disabled until the feature behind them exists.
   QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
-  file->addAction(QStringLiteral("&Open..."), QKeySequence::Open)->setEnabled(false);
+  file->addAction(QStringLiteral("&Open..."), QKeySequence::Open, this, &MainWindow::chooseImage);
   file->addAction(QStringLiteral("&Save"), QKeySequence::Save)->setEnabled(false);
   file->addAction(QStringLiteral("Save &As..."), QKeySequence::SaveAs)->setEnabled(false);
   file->addSeparator();
@@ -73,11 +76,42 @@ void MainWindow::addMenus() {
   edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo)->setEnabled(false);
 
   view_menu_ = menuBar()->addMenu(QStringLiteral("&View"));
-  view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn)->setEnabled(false);
-  view_menu_->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut)->setEnabled(false);
-  view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0))
-      ->setEnabled(false);
+  view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn, canvas_, &Canvas::zoomIn);
+  view_menu_->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut, canvas_,
+                        &Canvas::zoomOut);
+  view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0),
+                        canvas_, &Canvas::fitToWindow);
   view_menu_->addSeparator();
+}
+
+QString MainWindow::openImage(const QString& path) {
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage image = reader.read();
+  if (image.isNull()) {
+    return reader.errorString();
+  }
+  canvas_->setImage(image);
+  setWindowFilePath(path);
+  return {};
+}
+
+void MainWindow::chooseImage() {
+  QStringList patterns;
+  for (const QByteArray& format : QImageReader::supportedImageFormats()) {
+    patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
+  }
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("Open Image"), QString(),
+      QStringLiteral("Images (%1)").arg(patterns.join(QLatin1Char(' '))));
+  if (path.isEmpty()) {
+    return;
+  }
+  const QString error = openImage(path);
+  if (!error.isEmpty()) {
+    QMessageBox::warning(this, QStringLiteral("Open Image"),
+                         QStringLiteral("Could not open %1: %2").arg(path, error));
+  }
 }
 
 void MainWindow::addTools() {

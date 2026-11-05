@@ -38,7 +38,8 @@ case "$(uname -s)" in
   Linux) host=linux arch=linux_gcc_64 dir=gcc_64 archives="qtbase qtsvg icu" ;;
   *) host=windows arch=win64_msvc2022_64 dir=msvc2022_64 archives="qtbase qtsvg" ;;
 esac
-aqt install-qt "$host" desktop "$version" "$arch" --outputdir .qt --archives $archives
+aqt install-qt "$host" desktop "$version" "$arch" --outputdir .qt --archives $archives \
+  --modules qtshadertools
 prefix="$(pwd -W 2>/dev/null || pwd)/.qt/$version/$dir"
 echo "Qt is in $prefix"
 if [ -n "${GITHUB_ENV:-}" ]; then

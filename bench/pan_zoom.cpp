@@ -2,7 +2,9 @@
 
 #include <QApplication>
 #include <QImage>
+#include <QLinearGradient>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QWheelEvent>
 #include <algorithm>
 #include <chrono>
@@ -52,14 +54,34 @@ void measureFrames(benchmark::State& state, pinsel::Canvas& canvas,
   state.counters["p99_ms"] = seconds.at(p99) * 1000.0;
 }
 
-// Open a 3840x2160 test image in the canvas here, once it can hold one, so
-// the frames draw what milestone 1 promises. Until then they time the placeholder.
-void openTestImage(pinsel::Canvas& /*canvas*/) {}
+// Shows the canvas off screen with a 4K image, as milestone 1 promises: a
+// gradient under a grid. With Qt 6.10 on OpenGL, rendering a widget that was
+// never shown can skip the GPU frame and leaks memory on every call.
+void setUp(pinsel::Canvas& canvas) {
+  canvas.resize(kViewport);
+  canvas.setAttribute(Qt::WA_DontShowOnScreen);
+  canvas.show();
+
+  QImage image(3840, 2160, QImage::Format_RGBA8888_Premultiplied);
+  QPainter painter(&image);
+  QLinearGradient gradient(0, 0, image.width(), image.height());
+  gradient.setColorAt(0, QColor(40, 90, 160));
+  gradient.setColorAt(1, QColor(220, 140, 60));
+  painter.fillRect(image.rect(), gradient);
+  painter.setPen(QColor(255, 255, 255, 120));
+  for (int x = 0; x < image.width(); x += 128) {
+    painter.drawLine(x, 0, x, image.height());
+  }
+  for (int y = 0; y < image.height(); y += 128) {
+    painter.drawLine(0, y, image.width(), y);
+  }
+  painter.end();
+  canvas.setImage(image);
+}
 
 void BM_Pan(benchmark::State& state) {
   pinsel::Canvas canvas;
-  canvas.resize(kViewport);
-  openTestImage(canvas);
+  setUp(canvas);
   const QPointF centre(kViewport.width() / 2.0, kViewport.height() / 2.0);
   sendMouse(canvas, QEvent::MouseButtonPress, centre, Qt::MiddleButton, Qt::MiddleButton);
   measureFrames(state, canvas, [&](std::size_t frame) {
@@ -74,8 +96,7 @@ BENCHMARK(BM_Pan)->UseManualTime()->Unit(benchmark::kMillisecond);
 
 void BM_Zoom(benchmark::State& state) {
   pinsel::Canvas canvas;
-  canvas.resize(kViewport);
-  openTestImage(canvas);
+  setUp(canvas);
   const QPointF centre(kViewport.width() / 2.0, kViewport.height() / 2.0);
   measureFrames(state, canvas, [&](std::size_t frame) {
     // Ten notches in, ten out, so the zoom stays in range.

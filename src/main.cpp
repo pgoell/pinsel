@@ -21,7 +21,10 @@ int main(int argc, char** argv) {
   const QCommandLineOption size(QStringLiteral("size"),
                                 QStringLiteral("Window size, as WIDTHxHEIGHT."),
                                 QStringLiteral("size"));
+  const QCommandLineOption open(QStringLiteral("open"), QStringLiteral("Open an image."),
+                                QStringLiteral("path"));
   parser.addOption(screenshot);
+  parser.addOption(open);
   parser.addOption(size);
   parser.process(app);
 
@@ -34,6 +37,13 @@ int main(int argc, char** argv) {
       parser.showHelp(1);
     }
     window.resize(width, height);
+  }
+  if (parser.isSet(open)) {
+    const QString error = window.openImage(parser.value(open));
+    if (!error.isEmpty()) {
+      qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
+      return 1;
+    }
   }
   if (parser.isSet(screenshot)) {
     // Lays the window out at any size, unclipped by the screen, and never shows it.
