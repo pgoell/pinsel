@@ -41,7 +41,7 @@ QImage TileStore::toImage() const {
   QPainter painter(&image);
   painter.setCompositionMode(QPainter::CompositionMode_Source);
   for (std::size_t index = 0; index < tiles_.size(); ++index) {
-    painter.drawImage(tileRect(index).topLeft(), tiles_[index]);
+    painter.drawImage(tileRect(index).topLeft(), tiles_.at(index));
   }
   return image;
 }
@@ -58,16 +58,16 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&)>& draw) {
   for (std::size_t row = first_row; row <= last_row; ++row) {
     for (std::size_t column = first_column; column <= last_column; ++column) {
       const std::size_t index = (row * columns_) + column;
-      if (!saved_[index]) {
-        open_.push_back({.index = index, .image = tiles_[index]});
-        saved_[index] = true;
+      if (!saved_.at(index)) {
+        open_.push_back({.index = index, .image = tiles_.at(index)});
+        saved_.at(index) = true;
       }
       const QRect rect = tileRect(index);
-      QPainter painter(&tiles_[index]);
+      QPainter painter(&tiles_.at(index));
       painter.translate(-rect.topLeft());
       painter.setClipRect(bounded.intersected(rect));
       draw(painter);
-      dirty_[index] = true;
+      dirty_.at(index) = true;
     }
   }
 }
@@ -77,7 +77,7 @@ void TileStore::commit() {
     return;
   }
   for (const SavedTile& saved : open_) {
-    saved_[saved.index] = false;
+    saved_.at(saved.index) = false;
   }
   undo_.push_back(std::exchange(open_, {}));
   redo_.clear();
@@ -116,9 +116,9 @@ bool TileStore::canRedo() const {
 std::vector<std::size_t> TileStore::takeDirty() {
   std::vector<std::size_t> dirty;
   for (std::size_t index = 0; index < dirty_.size(); ++index) {
-    if (dirty_[index]) {
+    if (dirty_.at(index)) {
       dirty.push_back(index);
-      dirty_[index] = false;
+      dirty_.at(index) = false;
     }
   }
   return dirty;
@@ -126,8 +126,8 @@ std::vector<std::size_t> TileStore::takeDirty() {
 
 void TileStore::swapIn(Step& step) {
   for (SavedTile& saved : step) {
-    std::swap(tiles_[saved.index], saved.image);
-    dirty_[saved.index] = true;
+    std::swap(tiles_.at(saved.index), saved.image);
+    dirty_.at(saved.index) = true;
   }
 }
 

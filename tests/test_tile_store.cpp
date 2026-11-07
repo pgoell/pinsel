@@ -77,11 +77,9 @@ TEST(TileStore, PaintStaysInsideTheArea) {
   TileStore store = cleanStore();
   const QRect area(kTile - 10, 20, 20, 20);
   store.paint(area, [&](QPainter& painter) { painter.fillRect(0, 0, 2000, 2000, Qt::red); });
-  const QImage image = store.toImage();
-  EXPECT_EQ(image.pixelColor(area.topLeft()), QColor(Qt::red));
-  EXPECT_EQ(image.pixelColor(area.bottomRight()), QColor(Qt::red));
-  EXPECT_EQ(image.pixelColor(area.topLeft() - QPoint(1, 1)), QColor(Qt::white));
-  EXPECT_EQ(image.pixelColor(area.bottomRight() + QPoint(1, 1)), QColor(Qt::white));
+  QImage expected = filled(store.size(), Qt::white);
+  QPainter(&expected).fillRect(area, Qt::red);
+  EXPECT_EQ(store.toImage(), expected);
   EXPECT_EQ(store.takeDirty(), (Indices{0, 1}));
 }
 
