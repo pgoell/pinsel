@@ -31,6 +31,12 @@ class Canvas : public QRhiWidget {
   void zoomOut();
   void fitToWindow();
 
+  // GPU time of the frame before the latest render() call, in seconds. Zero
+  // unless the QRhi records timestamps, which QSG_RHI_PROFILE=1 turns on.
+  [[nodiscard]] double previousGpuFrameSeconds() const {
+    return previous_gpu_seconds_;
+  }
+
  protected:
   void initialize(QRhiCommandBuffer* commands) override;
   void render(QRhiCommandBuffer* commands) override;
@@ -51,6 +57,7 @@ class Canvas : public QRhiWidget {
   bool image_changed_ = false;
   View view_;
   QPointF drag_from_;
+  double previous_gpu_seconds_ = 0.0;
 };
 
 }  // namespace pinsel

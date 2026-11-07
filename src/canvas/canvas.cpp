@@ -190,6 +190,10 @@ void Canvas::initialize(QRhiCommandBuffer* /*commands*/) {
 
 void Canvas::render(QRhiCommandBuffer* commands) {
   ZoneScoped;
+  // QRhiWidget draws in offscreen frames, which wait for the GPU to finish, so
+  // the time is ready by the next frame.
+  previous_gpu_seconds_ = commands->lastCompletedGpuTime();
+  TracyPlot("gpu_ms", previous_gpu_seconds_ * 1000.0);
   QRhiResourceUpdateBatch* updates = rhi()->nextResourceUpdateBatch();
   if (image_changed_) {
     gpu_->uploadTiles(image_, updates);

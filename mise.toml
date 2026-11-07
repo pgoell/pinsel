@@ -92,10 +92,12 @@ run = [
   "build/release/bench",
 ]
 
-# Tracy records only while its viewer is connected.
+# Tracy records only while its viewer is connected. QSG_RHI_PROFILE makes Qt
+# record GPU timestamps, for the gpu_ms plot.
 [tasks.profile]
 description = "Build the profile preset and start pinsel for Tracy"
 shell = "bash -c"
+env = { QSG_RHI_PROFILE = "1" }
 run = [
   "cmake --preset profile",
   "cmake --build --preset profile",

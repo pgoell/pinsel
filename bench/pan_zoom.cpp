@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <numeric>
 #include <tracy/Tracy.hpp>
 #include <vector>
 
@@ -33,25 +34,44 @@ void sendWheel(QWidget& widget, QPointF pos, int delta) {
   QCoreApplication::sendEvent(&widget, &event);
 }
 
+double percentile(std::vector<double> values, double fraction) {
+  std::ranges::sort(values);
+  const auto index = static_cast<std::size_t>(static_cast<double>(values.size() - 1) * fraction);
+  return values.at(index);
+}
+
 // Times each frame on its own: input, then a full repaint into an image. Google
 // Benchmark reports the mean; the slowest frames decide whether pan and zoom feel
 // smooth, so the 99th percentile goes in a counter too.
+//
+// Rendering into an image also copies the frame back from the GPU, which a frame
+// on screen never does. So the wall time overstates a real frame, and the gpu_ms
+// counters give the GPU's own time for the draw.
 void measureFrames(benchmark::State& state, pinsel::Canvas& canvas,
                    const std::function<void(std::size_t frame)>& input) {
   QImage target(kViewport, QImage::Format_ARGB32_Premultiplied);
   std::vector<double> seconds;
+  std::vector<double> gpu_seconds;
   for ([[maybe_unused]] auto _ : state) {
     const auto start = std::chrono::steady_clock::now();
     input(seconds.size());
     canvas.render(&target);
     const std::chrono::duration<double> took = std::chrono::steady_clock::now() - start;
     state.SetIterationTime(took.count());
+    // Each frame reports the one before it, so the first report belongs to setUp.
+    if (!seconds.empty()) {
+      gpu_seconds.push_back(canvas.previousGpuFrameSeconds());
+    }
     seconds.push_back(took.count());
     FrameMark;
   }
-  std::ranges::sort(seconds);
-  const auto p99 = static_cast<std::size_t>(static_cast<double>(seconds.size() - 1) * 0.99);
-  state.counters["p99_ms"] = seconds.at(p99) * 1000.0;
+  state.counters["p99_ms"] = percentile(seconds, 0.99) * 1000.0;
+  // All zero means the backend records no timestamps; a zero counter would read as free.
+  if (std::ranges::any_of(gpu_seconds, [](double s) { return s > 0.0; })) {
+    state.counters["gpu_ms"] = std::accumulate(gpu_seconds.begin(), gpu_seconds.end(), 0.0) *
+                               1000.0 / static_cast<double>(gpu_seconds.size());
+    state.counters["gpu_p99_ms"] = percentile(gpu_seconds, 0.99) * 1000.0;
+  }
 }
 
 // Shows the canvas off screen with a 4K image, as milestone 1 promises: a
@@ -109,6 +129,8 @@ BENCHMARK(BM_Zoom)->UseManualTime()->Unit(benchmark::kMillisecond);
 }  // namespace
 
 int main(int argc, char** argv) {
+  // Qt reads this when it creates the QRhi, and then records GPU timestamps.
+  qputenv("QSG_RHI_PROFILE", "1");
   const QApplication app(argc, argv);
   benchmark::Initialize(&argc, argv);
   if (benchmark::ReportUnrecognizedArguments(argc, argv)) {
