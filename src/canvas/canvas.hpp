@@ -2,6 +2,7 @@
 
 #include <QPointF>
 #include <QRhiWidget>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -16,7 +17,7 @@ namespace pinsel {
 // button pans and the wheel zooms at the cursor.
 class Canvas : public QRhiWidget {
  public:
-  enum class Tool { Brush, Eraser, Mask, Pan };
+  enum class Tool : std::uint8_t { Brush, Eraser, Mask, Pan };
 
   explicit Canvas(QWidget* parent = nullptr);
   ~Canvas() override;
