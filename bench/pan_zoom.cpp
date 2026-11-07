@@ -1,10 +1,12 @@
 #include <benchmark/benchmark.h>
 
 #include <QApplication>
+#include <QColor>
 #include <QImage>
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRect>
 #include <QWheelEvent>
 #include <algorithm>
 #include <chrono>
@@ -16,6 +18,7 @@
 #include <vector>
 
 #include "canvas/canvas.hpp"
+#include "tiles/tile_store.hpp"
 
 namespace {
 
@@ -96,7 +99,7 @@ void setUp(pinsel::Canvas& canvas) {
     painter.drawLine(0, y, image.width(), y);
   }
   painter.end();
-  canvas.setImage(image);
+  canvas.setImage(pinsel::TileStore(image));
 }
 
 void BM_Pan(benchmark::State& state) {
@@ -125,6 +128,23 @@ void BM_Zoom(benchmark::State& state) {
   });
 }
 BENCHMARK(BM_Zoom)->UseManualTime()->Unit(benchmark::kMillisecond);
+
+// A brush stand-in: one dab a frame, moving along a line across the image, so
+// each frame dirties one or two tiles and uploads only those. One open undo
+// step holds the whole run, so undo keeps each tile once.
+void BM_Paint(benchmark::State& state) {
+  pinsel::Canvas canvas;
+  setUp(canvas);
+  constexpr int kDab = 64;
+  measureFrames(state, canvas, [&](std::size_t frame) {
+    const int x = static_cast<int>((frame * 16) % static_cast<std::size_t>(3840 - kDab));
+    const QRect dab(x, 1000, kDab, kDab);
+    canvas.edit([&](pinsel::TileStore& tiles) {
+      tiles.paint(dab, [&](QPainter& painter) { painter.fillRect(dab, QColor(200, 30, 30)); });
+    });
+  });
+}
+BENCHMARK(BM_Paint)->UseManualTime()->Unit(benchmark::kMillisecond);
 
 }  // namespace
 

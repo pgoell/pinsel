@@ -45,9 +45,14 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
+add_library(pinsel-tiles src/tiles/tile_store.cpp)
+target_include_directories(pinsel-tiles PUBLIC src)
+target_link_libraries(pinsel-tiles PUBLIC Qt6::Gui)
+target_compile_options(pinsel-tiles PRIVATE ${WARNINGS})
+
 add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
-target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets PRIVATE Qt6::GuiPrivate)
+target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets pinsel-tiles PRIVATE Qt6::GuiPrivate)
 qt_add_shaders(pinsel-canvas shaders PREFIX /shaders BASE src/canvas
                FILES src/canvas/canvas.vert src/canvas/canvas.frag)
 # The Tracy client defines TRACY_ENABLE for everything that links it. Without it,
@@ -84,8 +89,8 @@ if(BUILD_TESTING)
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
-  add_executable(tests tests/test_project.cpp tests/test_view.cpp)
-  target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas GTest::gtest_main)
+  add_executable(tests tests/test_project.cpp tests/test_tile_store.cpp tests/test_view.cpp)
+  target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-tiles GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
   include(GoogleTest)
   gtest_discover_tests(tests)
