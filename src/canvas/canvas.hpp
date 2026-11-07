@@ -36,7 +36,8 @@ class Canvas : public QRhiWidget {
     return tiles_;
   }
   void setTool(Tool tool);
-  // The brush and the eraser share these; the eraser ignores the color.
+  // The brush, the eraser and the mask tool share these; only the brush uses the
+  // color.
   void setBrush(const BrushSettings& brush);
   void eraseMask();
   void undo();

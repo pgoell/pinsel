@@ -83,7 +83,7 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_
       save(plane, index);
       const QRect rect = tileRect(index);
       QImage& tile = planes_.at(planeIndex(plane)).at(index);
-      if (tile.isNull()) {
+      if (plane == Plane::Mask && tile.isNull()) {
         tile = QImage(rect.size(), kMaskFormat);
         tile.fill(Qt::transparent);
       }
