@@ -13,8 +13,10 @@
 
 namespace pinsel {
 
-// Draws the image as GPU tiles. The left mouse button uses the tool, the middle
-// button pans and the wheel zooms at the cursor.
+// Draws the image as GPU tiles, with the mask as a red tint over it. The left
+// mouse button uses the tool, the middle button pans and the wheel zooms at the
+// cursor. The mask tool paints the mask with the brush's size and opacity, and
+// erases it while Alt is held.
 class Canvas : public QRhiWidget {
  public:
   enum class Tool : std::uint8_t { Brush, Eraser, Mask, Pan };
@@ -36,6 +38,7 @@ class Canvas : public QRhiWidget {
   void setTool(Tool tool);
   // The brush and the eraser share these; the eraser ignores the color.
   void setBrush(const BrushSettings& brush);
+  void eraseMask();
   void undo();
   void redo();
   // Called whenever what undo and redo would do may have changed.

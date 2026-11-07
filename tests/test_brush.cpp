@@ -92,4 +92,23 @@ TEST(Stroke, EachStrokeIsOneUndoStep) {
   EXPECT_FALSE(store.undo());
 }
 
+TEST(Stroke, OnTheMaskLeavesTheImageAlone) {
+  TileStore store = whiteStore();
+  constexpr auto kMask = TileStore::Plane::Mask;
+  {
+    Stroke stroke(store, {.size = 20, .opacity = 0.5, .color = Qt::blue, .erase = false}, kMask);
+    stroke.moveTo(QPointF(200, 150));
+    stroke.moveTo(QPointF(600, 150));
+  }
+  EXPECT_EQ(at(store, QPoint(550, 150)), QColor(Qt::white));
+  EXPECT_NEAR(store.toImage(kMask).pixelColor(550, 150).alpha(), 128, 1);
+  EXPECT_EQ(store.toImage(kMask).pixelColor(550, 100).alpha(), 0);
+  {
+    Stroke stroke(store, {.size = 20, .opacity = 1.0, .color = Qt::blue, .erase = true}, kMask);
+    stroke.moveTo(QPointF(550, 150));
+  }
+  EXPECT_EQ(store.toImage(kMask).pixelColor(550, 150).alpha(), 0);
+  EXPECT_NEAR(store.toImage(kMask).pixelColor(300, 150).alpha(), 128, 1);
+}
+
 }  // namespace

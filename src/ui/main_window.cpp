@@ -107,6 +107,9 @@ void MainWindow::addMenus() {
       edit->addAction(QStringLiteral("&Undo"), QKeySequence::Undo, canvas_, &Canvas::undo);
   QAction* redo =
       edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo, canvas_, &Canvas::redo);
+  edit->addSeparator();
+  edit->addAction(QStringLiteral("Clear &Mask"), QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_M),
+                  canvas_, &Canvas::eraseMask);
   const auto updateHistory = [this, undo, redo] {
     undo->setEnabled(canvas_->tiles().canUndo());
     redo->setEnabled(canvas_->tiles().canRedo());

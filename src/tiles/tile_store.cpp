@@ -21,7 +21,7 @@ TileStore::TileStore(const QImage& image) {
   size_ = image.size();
   columns_ = tilesAcross(image.width());
   const std::size_t count = columns_ * tilesAcross(image.height());
-  tiles_.reserve(count);
+  planes_.at(planeIndex(Plane::Image)).reserve(count);
   for (std::size_t index = 0; index < count; ++index) {
     // Converting tile by tile, not the whole image first, keeps the peak at the
     // source plus the tiles. The 32-bit formats convert in place.
@@ -31,10 +31,13 @@ TileStore::TileStore(const QImage& image) {
       *this = TileStore();
       return;
     }
-    tiles_.push_back(std::move(tile));
+    planes_.at(planeIndex(Plane::Image)).push_back(std::move(tile));
   }
-  dirty_.assign(count, true);
-  saved_.assign(count, false);
+  planes_.at(planeIndex(Plane::Mask)).resize(count);
+  for (std::size_t plane = 0; plane < kPlanes; ++plane) {
+    dirty_.at(plane).assign(count, plane == planeIndex(Plane::Image));
+    saved_.at(plane).assign(count, false);
+  }
 }
 
 QRect TileStore::tileRect(std::size_t index) const {
@@ -44,17 +47,28 @@ QRect TileStore::tileRect(std::size_t index) const {
       .intersected(QRect(QPoint(), size_));
 }
 
-QImage TileStore::toImage() const {
-  QImage image(size_, kFormat);
+QImage TileStore::toImage(Plane plane) const {
+  QImage image(size_, plane == Plane::Image ? kFormat : kMaskFormat);
+  image.fill(Qt::transparent);
   QPainter painter(&image);
   painter.setCompositionMode(QPainter::CompositionMode_Source);
-  for (std::size_t index = 0; index < tiles_.size(); ++index) {
-    painter.drawImage(tileRect(index).topLeft(), tiles_.at(index));
+  const std::vector<QImage>& tiles = planes_.at(planeIndex(plane));
+  for (std::size_t index = 0; index < tiles.size(); ++index) {
+    painter.drawImage(tileRect(index).topLeft(), tiles.at(index));
   }
   return image;
 }
 
-void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw) {
+void TileStore::save(Plane plane, std::size_t index) {
+  std::vector<bool>& saved = saved_.at(planeIndex(plane));
+  if (!saved.at(index)) {
+    open_.push_back({.plane = plane, .index = index, .image = tile(index, plane)});
+    saved.at(index) = true;
+  }
+}
+
+void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw,
+                      Plane plane) {
   const QRect bounded = area.intersected(QRect(QPoint(), size_));
   if (bounded.isEmpty()) {
     return;
@@ -66,16 +80,18 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_
   for (std::size_t row = first_row; row <= last_row; ++row) {
     for (std::size_t column = first_column; column <= last_column; ++column) {
       const std::size_t index = (row * columns_) + column;
-      if (!saved_.at(index)) {
-        open_.push_back({.index = index, .image = tiles_.at(index)});
-        saved_.at(index) = true;
-      }
+      save(plane, index);
       const QRect rect = tileRect(index);
-      QPainter painter(&tiles_.at(index));
+      QImage& tile = planes_.at(planeIndex(plane)).at(index);
+      if (tile.isNull()) {
+        tile = QImage(rect.size(), kMaskFormat);
+        tile.fill(Qt::transparent);
+      }
+      QPainter painter(&tile);
       painter.translate(-rect.topLeft());
       painter.setClipRect(bounded.intersected(rect));
       draw(painter, index);
-      dirty_.at(index) = true;
+      dirty_.at(planeIndex(plane)).at(index) = true;
     }
   }
 }
@@ -85,11 +101,24 @@ void TileStore::commit() {
     return;
   }
   for (const SavedTile& saved : open_) {
-    saved_.at(saved.index) = false;
+    saved_.at(planeIndex(saved.plane)).at(saved.index) = false;
   }
   undo_.push_back(std::exchange(open_, {}));
   redo_.clear();
   trimUndo();
+}
+
+void TileStore::clearMask() {
+  commit();
+  std::vector<QImage>& mask = planes_.at(planeIndex(Plane::Mask));
+  for (std::size_t index = 0; index < mask.size(); ++index) {
+    if (!mask.at(index).isNull()) {
+      save(Plane::Mask, index);
+      mask.at(index) = QImage();
+      dirty_.at(planeIndex(Plane::Mask)).at(index) = true;
+    }
+  }
+  commit();
 }
 
 void TileStore::setUndoBudget(std::size_t bytes) {
@@ -99,8 +128,10 @@ void TileStore::setUndoBudget(std::size_t bytes) {
 
 std::size_t TileStore::bytes() const {
   std::size_t bytes = 0;
-  for (const QImage& tile : tiles_) {
-    bytes += static_cast<std::size_t>(tile.sizeInBytes());
+  for (const std::vector<QImage>& tiles : planes_) {
+    for (const QImage& tile : tiles) {
+      bytes += static_cast<std::size_t>(tile.sizeInBytes());
+    }
   }
   return bytes;
 }
@@ -157,12 +188,13 @@ bool TileStore::canRedo() const {
   return open_.empty() && !redo_.empty();
 }
 
-std::vector<std::size_t> TileStore::takeDirty() {
+std::vector<std::size_t> TileStore::takeDirty(Plane plane) {
+  std::vector<bool>& flags = dirty_.at(planeIndex(plane));
   std::vector<std::size_t> dirty;
-  for (std::size_t index = 0; index < dirty_.size(); ++index) {
-    if (dirty_.at(index)) {
+  for (std::size_t index = 0; index < flags.size(); ++index) {
+    if (flags.at(index)) {
       dirty.push_back(index);
-      dirty_.at(index) = false;
+      flags.at(index) = false;
     }
   }
   return dirty;
@@ -170,8 +202,8 @@ std::vector<std::size_t> TileStore::takeDirty() {
 
 void TileStore::swapIn(Step& step) {
   for (SavedTile& saved : step) {
-    std::swap(tiles_.at(saved.index), saved.image);
-    dirty_.at(saved.index) = true;
+    std::swap(planes_.at(planeIndex(saved.plane)).at(saved.index), saved.image);
+    dirty_.at(planeIndex(saved.plane)).at(saved.index) = true;
   }
 }
 
