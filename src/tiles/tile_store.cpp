@@ -1,6 +1,7 @@
 #include "tiles/tile_store.hpp"
 
 #include <QPainter>
+#include <cstddef>
 #include <utility>
 
 namespace pinsel {
@@ -51,7 +52,7 @@ QImage TileStore::toImage() const {
   return image;
 }
 
-void TileStore::paint(QRect area, const std::function<void(QPainter&)>& draw) {
+void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw) {
   const QRect bounded = area.intersected(QRect(QPoint(), size_));
   if (bounded.isEmpty()) {
     return;
@@ -71,7 +72,7 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&)>& draw) {
       QPainter painter(&tiles_.at(index));
       painter.translate(-rect.topLeft());
       painter.setClipRect(bounded.intersected(rect));
-      draw(painter);
+      draw(painter, index);
       dirty_.at(index) = true;
     }
   }
@@ -86,6 +87,29 @@ void TileStore::commit() {
   }
   undo_.push_back(std::exchange(open_, {}));
   redo_.clear();
+  trimUndo();
+}
+
+void TileStore::setUndoBudget(std::size_t bytes) {
+  undo_budget_ = bytes;
+  trimUndo();
+}
+
+void TileStore::trimUndo() {
+  std::size_t bytes = 0;
+  for (const Step& step : undo_) {
+    for (const SavedTile& saved : step) {
+      bytes += static_cast<std::size_t>(saved.image.sizeInBytes());
+    }
+  }
+  std::size_t dropped = 0;
+  while (bytes > undo_budget_ && undo_.size() - dropped > 1) {
+    for (const SavedTile& saved : undo_.at(dropped)) {
+      bytes -= static_cast<std::size_t>(saved.image.sizeInBytes());
+    }
+    ++dropped;
+  }
+  undo_.erase(undo_.begin(), undo_.begin() + static_cast<std::ptrdiff_t>(dropped));
 }
 
 bool TileStore::undo() {

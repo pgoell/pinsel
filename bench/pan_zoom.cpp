@@ -6,7 +6,6 @@
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
-#include <QRect>
 #include <QWheelEvent>
 #include <algorithm>
 #include <chrono>
@@ -129,20 +128,21 @@ void BM_Zoom(benchmark::State& state) {
 }
 BENCHMARK(BM_Zoom)->UseManualTime()->Unit(benchmark::kMillisecond);
 
-// A brush stand-in: one dab a frame, moving along a line across the image, so
-// each frame dirties one or two tiles and uploads only those. One open undo
-// step holds the whole run, so undo keeps each tile once.
+// One long brush stroke in a circle, at the default brush size, so each frame
+// lays a few dabs and uploads only the tiles they touch.
 void BM_Paint(benchmark::State& state) {
   pinsel::Canvas canvas;
   setUp(canvas);
-  constexpr int kDab = 64;
+  const QPointF centre(kViewport.width() / 2.0, kViewport.height() / 2.0);
+  const auto onCircle = [&](std::size_t frame) {
+    const double angle = static_cast<double>(frame) * 0.05;
+    return centre + (QPointF(std::cos(angle), std::sin(angle)) * 300.0);
+  };
+  sendMouse(canvas, QEvent::MouseButtonPress, onCircle(0), Qt::LeftButton, Qt::LeftButton);
   measureFrames(state, canvas, [&](std::size_t frame) {
-    const int x = static_cast<int>((frame * 16) % static_cast<std::size_t>(3840 - kDab));
-    const QRect dab(x, 1000, kDab, kDab);
-    canvas.edit([&](pinsel::TileStore& tiles) {
-      tiles.paint(dab, [&](QPainter& painter) { painter.fillRect(dab, QColor(200, 30, 30)); });
-    });
+    sendMouse(canvas, QEvent::MouseMove, onCircle(frame), Qt::NoButton, Qt::LeftButton);
   });
+  sendMouse(canvas, QEvent::MouseButtonRelease, centre, Qt::LeftButton, Qt::NoButton);
 }
 BENCHMARK(BM_Paint)->UseManualTime()->Unit(benchmark::kMillisecond);
 

@@ -50,9 +50,13 @@ target_include_directories(pinsel-tiles PUBLIC src)
 target_link_libraries(pinsel-tiles PUBLIC Qt6::Gui)
 target_compile_options(pinsel-tiles PRIVATE ${WARNINGS})
 
+add_library(pinsel-brush src/brush/brush.cpp)
+target_link_libraries(pinsel-brush PUBLIC pinsel-tiles)
+target_compile_options(pinsel-brush PRIVATE ${WARNINGS})
+
 add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
-target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets pinsel-tiles PRIVATE Qt6::GuiPrivate)
+target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets pinsel-brush PRIVATE Qt6::GuiPrivate)
 qt_add_shaders(pinsel-canvas shaders PREFIX /shaders BASE src/canvas
                FILES src/canvas/canvas.vert src/canvas/canvas.frag)
 # The Tracy client defines TRACY_ENABLE for everything that links it. Without it,
@@ -89,20 +93,30 @@ if(BUILD_TESTING)
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
-  add_executable(tests tests/test_project.cpp tests/test_tile_store.cpp tests/test_view.cpp)
-  target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-tiles GTest::gtest_main)
+  # CI posts every PNG the tests write here to the pull request.
+  set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
+  file(MAKE_DIRECTORY ${SHOTS})
+
+  add_executable(tests tests/test_brush.cpp tests/test_canvas.cpp tests/test_project.cpp
+                       tests/test_tile_store.cpp tests/test_view.cpp)
+  target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-brush pinsel-tiles
+                                      GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
+  target_compile_definitions(tests PRIVATE PINSEL_SCREENSHOTS="${SHOTS}")
   include(GoogleTest)
-  gtest_discover_tests(tests)
+  # The canvas tests make a QApplication; listing the tests makes none.
+  if(WIN32)
+    gtest_discover_tests(tests)
+  else()
+    gtest_discover_tests(tests PROPERTIES ENVIRONMENT_MODIFICATION QT_QPA_PLATFORM=set:offscreen)
+  endif()
 
   # One pass of each benchmark, so the harness keeps working under the sanitizers.
   add_test(NAME bench_smoke COMMAND bench --benchmark_min_time=1x)
 
-  # CI posts every PNG these write to the pull request: a 1080p screen, and a 4K
-  # screen at 200% scaling. The image spans several tiles, so a seam would show.
-  set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
+  # A 1080p screen, and a 4K screen at 200% scaling. The image spans several
+  # tiles, so a seam would show.
   set(PATTERN ${CMAKE_SOURCE_DIR}/tests/data/pattern.png)
-  file(MAKE_DIRECTORY ${SHOTS})
   add_test(NAME screenshot_1080p
            COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080
                    --open ${PATTERN})

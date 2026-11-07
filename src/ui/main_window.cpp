@@ -2,6 +2,7 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QColorDialog>
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFormLayout>
@@ -13,6 +14,8 @@
 #include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPixmap>
+#include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolBar>
@@ -34,8 +37,10 @@ struct Range {
   int value;
 };
 
-// A slider with a number field beside it, kept in step both ways.
-void addSliderRow(QFormLayout* form, const QString& label, Range range, const QString& suffix) {
+// A slider with a number field beside it, kept in step both ways. Calls changed
+// with each new value, and once with the first.
+void addSliderRow(QFormLayout* form, const QString& label, Range range, const QString& suffix,
+                  const std::function<void(int)>& changed) {
   auto* row = new QWidget(form->parentWidget());
   auto* layout = new QHBoxLayout(row);
   layout->setContentsMargins(0, 0, 0, 0);
@@ -49,7 +54,9 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   field->setFixedWidth(64);
   QObject::connect(slider, &QSlider::valueChanged, field, &QSpinBox::setValue);
   QObject::connect(field, &QSpinBox::valueChanged, slider, &QSlider::setValue);
+  QObject::connect(slider, &QSlider::valueChanged, row, changed);
   slider->setValue(range.value);
+  changed(slider->value());
   layout->addWidget(slider, 1);
   layout->addWidget(field);
   form->addRow(label, row);
@@ -96,8 +103,16 @@ void MainWindow::addMenus() {
   file->addAction(QStringLiteral("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
   QMenu* edit = menuBar()->addMenu(QStringLiteral("&Edit"));
-  edit->addAction(QStringLiteral("&Undo"), QKeySequence::Undo)->setEnabled(false);
-  edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo)->setEnabled(false);
+  QAction* undo =
+      edit->addAction(QStringLiteral("&Undo"), QKeySequence::Undo, canvas_, &Canvas::undo);
+  QAction* redo =
+      edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo, canvas_, &Canvas::redo);
+  const auto updateHistory = [this, undo, redo] {
+    undo->setEnabled(canvas_->tiles().canUndo());
+    redo->setEnabled(canvas_->tiles().canRedo());
+  };
+  canvas_->setHistoryChanged(updateHistory);
+  updateHistory();
 
   view_menu_ = menuBar()->addMenu(QStringLiteral("&View"));
   view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn, canvas_, &Canvas::zoomIn);
@@ -154,12 +169,12 @@ void MainWindow::addTools() {
   addToolBar(Qt::LeftToolBarArea, tools);
   auto* group = new QActionGroup(tools);
   const std::array entries{
-      std::tuple{"Brush", "brush", Qt::Key_B},
-      std::tuple{"Eraser", "eraser", Qt::Key_E},
-      std::tuple{"Mask", "square-dashed", Qt::Key_M},
-      std::tuple{"Pan", "hand", Qt::Key_H},
+      std::tuple{"Brush", "brush", Qt::Key_B, Canvas::Tool::Brush},
+      std::tuple{"Eraser", "eraser", Qt::Key_E, Canvas::Tool::Eraser},
+      std::tuple{"Mask", "square-dashed", Qt::Key_M, Canvas::Tool::Mask},
+      std::tuple{"Pan", "hand", Qt::Key_H, Canvas::Tool::Pan},
   };
-  for (const auto& [name, icon, key] : entries) {
+  for (const auto& [name, icon, key, tool] : entries) {
     QAction* action =
         tools->addAction(QIcon(QStringLiteral(":/icons/%1.svg").arg(QString::fromLatin1(icon))),
                          QString::fromLatin1(name));
@@ -167,6 +182,7 @@ void MainWindow::addTools() {
     action->setToolTip(
         QStringLiteral("%1 (%2)").arg(QString::fromLatin1(name), QKeySequence(key).toString()));
     action->setCheckable(true);
+    connect(action, &QAction::triggered, canvas_, [this, tool] { canvas_->setTool(tool); });
     group->addAction(action);
   }
   group->actions().constFirst()->setChecked(true);
@@ -181,9 +197,32 @@ void MainWindow::addPanels() {
   auto* settings = new QWidget(brush);
   auto* form = new QFormLayout(settings);
   addSliderRow(form, QStringLiteral("Size"), {.min = 1, .max = 500, .value = 40},
-               QStringLiteral(" px"));
-  addSliderRow(form, QStringLiteral("Opacity"), {.min = 0, .max = 100, .value = 100},
-               QStringLiteral(" %"));
+               QStringLiteral(" px"), [this](int value) {
+                 brush_.size = value;
+                 canvas_->setBrush(brush_);
+               });
+  addSliderRow(form, QStringLiteral("Opacity"), {.min = 1, .max = 100, .value = 100},
+               QStringLiteral(" %"), [this](int value) {
+                 brush_.opacity = value / 100.0;
+                 canvas_->setBrush(brush_);
+               });
+  auto* color = new QPushButton(settings);
+  const auto showColor = [color](const QColor& value) {
+    QPixmap swatch(16, 16);
+    swatch.fill(value);
+    color->setIcon(QIcon(swatch));
+    color->setText(value.name());
+  };
+  showColor(brush_.color);
+  connect(color, &QPushButton::clicked, this, [this, showColor] {
+    const QColor chosen = QColorDialog::getColor(brush_.color, this, QStringLiteral("Brush Color"));
+    if (chosen.isValid()) {
+      brush_.color = chosen;
+      canvas_->setBrush(brush_);
+      showColor(chosen);
+    }
+  });
+  form->addRow(QStringLiteral("Color"), color);
   brush->setWidget(settings);
   addDockWidget(Qt::RightDockWidgetArea, brush);
 
