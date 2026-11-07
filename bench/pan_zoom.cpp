@@ -16,6 +16,17 @@
 #include <tracy/Tracy.hpp>
 #include <vector>
 
+#ifdef _WIN32
+#include <windows.h>
+// psapi.h needs windows.h first.
+#include <psapi.h>
+#else
+#include <fstream>
+#include <string>
+#include <string_view>
+#include <utility>
+#endif
+
 #include "canvas/canvas.hpp"
 #include "tiles/tile_store.hpp"
 
@@ -34,6 +45,39 @@ void sendWheel(QWidget& widget, QPointF pos, int delta) {
   QWheelEvent event(pos, widget.mapToGlobal(pos), QPoint(), QPoint(0, delta), Qt::NoButton,
                     Qt::NoModifier, Qt::NoScrollPhase, false);
   QCoreApplication::sendEvent(&widget, &event);
+}
+
+struct ProcessMemory {
+  double now_mb = 0.0;
+  double peak_mb = 0.0;
+};
+
+// On Windows the private bytes, which count the driver's upload copies in this
+// process too; elsewhere the resident set.
+ProcessMemory processMemory() {
+#ifdef _WIN32
+  constexpr double kMiB = 1024.0 * 1024.0;
+  PROCESS_MEMORY_COUNTERS_EX counters{};
+  if (GetProcessMemoryInfo(GetCurrentProcess(),
+                           reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&counters),
+                           sizeof(counters)) == 0) {
+    return {};
+  }
+  return {.now_mb = static_cast<double>(counters.PrivateUsage) / kMiB,
+          .peak_mb = static_cast<double>(counters.PeakPagefileUsage) / kMiB};
+#else
+  ProcessMemory memory;
+  std::ifstream status("/proc/self/status");
+  std::string line;
+  while (std::getline(status, line)) {
+    for (auto [key, mb] : {std::pair{"VmRSS:", &memory.now_mb}, {"VmHWM:", &memory.peak_mb}}) {
+      if (line.starts_with(key)) {
+        *mb = std::stod(line.substr(std::string_view(key).size())) / 1024.0;
+      }
+    }
+  }
+  return memory;
+#endif
 }
 
 double percentile(std::vector<double> values, double fraction) {
@@ -68,6 +112,10 @@ void measureFrames(benchmark::State& state, pinsel::Canvas& canvas,
     FrameMark;
   }
   state.counters["p99_ms"] = percentile(seconds, 0.99) * 1000.0;
+  // The peak covers the whole run so far, not just this benchmark.
+  const ProcessMemory memory = processMemory();
+  state.counters["mem_mb"] = memory.now_mb;
+  state.counters["peak_mem_mb"] = memory.peak_mb;
   // All zero means the backend records no timestamps; a zero counter would read as free.
   if (std::ranges::any_of(gpu_seconds, [](double s) { return s > 0.0; })) {
     state.counters["gpu_ms"] = std::accumulate(gpu_seconds.begin(), gpu_seconds.end(), 0.0) *

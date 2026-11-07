@@ -3,6 +3,9 @@
 #
 # cppcoreguidelines-owning-memory is off: Qt widgets are created with `new` and
 # owned by their parent, which deletes them.
+#
+# bugprone-reserved-identifier allows the __sanitizer_ functions: the memory
+# tests declare them, since not every clang-tidy ships the sanitizer headers.
 Checks: >
   bugprone-*,
   clang-analyzer-*,
@@ -19,3 +22,4 @@ WarningsAsErrors: "*"
 HeaderFilterRegex: "/(src|tests)/"
 CheckOptions:
   readability-function-cognitive-complexity.Threshold: 15
+  bugprone-reserved-identifier.AllowedIdentifiers: "^__sanitizer_"

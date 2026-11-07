@@ -14,6 +14,11 @@
 #include <utility>
 #include <vector>
 
+#ifdef Q_OS_WIN
+#include <dxgi1_3.h>
+#include <wrl/client.h>
+#endif
+
 namespace pinsel {
 
 namespace {
@@ -64,6 +69,8 @@ struct Canvas::Gpu {
   std::unique_ptr<QRhiGraphicsPipeline> pipeline;
   std::unique_ptr<QRhiBuffer> vertices;
   std::vector<Tile> tiles;
+  // Set by a frame that uploaded a whole image, for the frame after it.
+  bool trim_pending = false;
 
   [[nodiscard]] std::unique_ptr<QRhiShaderResourceBindings> bind(QRhiTexture* texture) const {
     std::unique_ptr<QRhiShaderResourceBindings> bindings(rhi->newShaderResourceBindings());
@@ -139,6 +146,24 @@ struct Canvas::Gpu {
     vertices.reset(rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, bytes));
     vertices->create();
     updates->uploadStaticBuffer(vertices.get(), data.data());
+  }
+
+  // The D3D11 driver copies each upload into staging memory in this process
+  // and keeps it for reuse: about 45 MB after a 4K image, more than the image's
+  // own tiles. IDXGIDevice3::Trim gives it back; the next upload takes it again.
+  // https://learn.microsoft.com/windows/win32/api/dxgi1_3/nf-dxgi1_3-idxgidevice3-trim
+  void releaseUploadMemory() const {
+#ifdef Q_OS_WIN
+    if (rhi->backend() != QRhi::D3D11) {
+      return;
+    }
+    const auto* handles = static_cast<const QRhiD3D11NativeHandles*>(rhi->nativeHandles());
+    Microsoft::WRL::ComPtr<IDXGIDevice3> device;
+    if (SUCCEEDED(
+            Microsoft::WRL::ComPtr<IUnknown>(static_cast<IUnknown*>(handles->dev)).As(&device))) {
+      device->Trim();
+    }
+#endif
   }
 
   void upload(const TileStore& store, std::size_t index, QRhiResourceUpdateBatch* updates) {
@@ -240,11 +265,18 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   // the time is ready by the next frame.
   previous_gpu_seconds_ = commands->lastCompletedGpuTime();
   TracyPlot("gpu_ms", previous_gpu_seconds_ * 1000.0);
+  if (gpu_->trim_pending) {
+    gpu_->releaseUploadMemory();
+    gpu_->trim_pending = false;
+  }
   QRhiResourceUpdateBatch* updates = rhi()->nextResourceUpdateBatch();
   if (image_changed_) {
     gpu_->createTiles(tiles_, updates);
     std::ignore = tiles_.takeDirty();
     image_changed_ = false;
+    gpu_->trim_pending = true;
+    // Draws a second frame, even if nothing else changes, to trim in.
+    update();
   } else {
     for (const std::size_t index : tiles_.takeDirty()) {
       gpu_->upload(tiles_, index, updates);
