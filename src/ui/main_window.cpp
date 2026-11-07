@@ -113,13 +113,13 @@ void MainWindow::openImage(const QString& path, std::function<void(const QString
   auto* watcher = new QFutureWatcher<Loaded>(this);
   connect(watcher, &QFutureWatcher<Loaded>::finished, this,
           [this, watcher, id, path, done = std::move(done)] {
-            const Loaded loaded = watcher->result();
+            Loaded loaded = watcher->result();
             watcher->deleteLater();
             if (id != latest_open_) {
               return;
             }
             if (loaded.error.isEmpty()) {
-              canvas_->setImage(loaded.tiles);
+              canvas_->setImage(std::move(loaded.tiles));
               setWindowFilePath(path);
             }
             done(loaded.error);

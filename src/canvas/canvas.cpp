@@ -115,7 +115,6 @@ struct Canvas::Gpu {
     pipeline->create();
   }
 
-  // Makes a texture for each tile and uploads them all.
   void createTiles(const TileStore& store, QRhiResourceUpdateBatch* updates) {
     ZoneScoped;
     tiles.clear();
