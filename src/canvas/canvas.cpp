@@ -3,13 +3,6 @@
 #include <rhi/qrhi.h>
 
 #include <QFile>
-#include <QDebug>
-#include <QTimer>
-#ifdef _WIN32
-#include <windows.h>
-#include <psapi.h>
-#include <dxgi1_3.h>
-#endif
 #include <QMatrix4x4>
 #include <QMouseEvent>
 #include <QWheelEvent>
@@ -24,22 +17,6 @@
 namespace pinsel {
 
 namespace {
-
-// EXPERIMENT ONLY: memory probes, switched by environment variables.
-void logMemory(const char* where) {
-  if (!qEnvironmentVariableIsSet("PINSEL_MEMLOG")) {
-    return;
-  }
-#ifdef _WIN32
-  PROCESS_MEMORY_COUNTERS_EX c{};
-  GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&c), sizeof(c));
-  qWarning("MEMLOG %s private=%.1f MB", where, double(c.PrivateUsage) / 1048576.0);
-#else
-  qWarning("MEMLOG %s", where);
-#endif
-}
-bool noMips() { return qEnvironmentVariableIsSet("PINSEL_NO_MIPS"); }
-int uploadsPerFrame() { return qEnvironmentVariableIntValue("PINSEL_UPLOADS_PER_FRAME"); }
 
 constexpr double kZoomStep = 1.25;
 constexpr double kWheelNotch = 120.0;
@@ -87,7 +64,6 @@ struct Canvas::Gpu {
   std::unique_ptr<QRhiGraphicsPipeline> pipeline;
   std::unique_ptr<QRhiBuffer> vertices;
   std::vector<Tile> tiles;
-  std::vector<std::size_t> pending;
 
   [[nodiscard]] std::unique_ptr<QRhiShaderResourceBindings> bind(QRhiTexture* texture) const {
     std::unique_ptr<QRhiShaderResourceBindings> bindings(rhi->newShaderResourceBindings());
@@ -149,17 +125,12 @@ struct Canvas::Gpu {
       tile.rect = store.tileRect(index);
       tile.texture.reset(
           rhi->newTexture(QRhiTexture::RGBA8, tile.rect.size(), 1,
-                          noMips() ? QRhiTexture::Flags()
-                                   : (QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips)));
+                          QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
       tile.texture->create();
       tile.bindings = bind(tile.texture.get());
       appendQuad(data, tile.rect);
       tiles.push_back(std::move(tile));
-      if (uploadsPerFrame() > 0) {
-        pending.push_back(index);
-      } else {
-        upload(store, index, updates);
-      }
+      upload(store, index, updates);
     }
     if (data.empty()) {
       return;
@@ -174,27 +145,17 @@ struct Canvas::Gpu {
     QRhiTexture* texture = tiles.at(index).texture.get();
     const QRhiTextureSubresourceUploadDescription source(store.tile(index));
     updates->uploadTexture(texture, QRhiTextureUploadEntry(0, 0, source));
-    if (!noMips()) {
-      updates->generateMips(texture);
-    }
+    updates->generateMips(texture);
   }
 };
 
-Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>()) {
-  const QByteArray api = qgetenv("QT_WIDGETS_RHI_BACKEND");
-  if (api == "d3d11") setApi(Api::Direct3D11);
-  if (api == "d3d12") setApi(Api::Direct3D12);
-  if (api == "vulkan") setApi(Api::Vulkan);
-  if (api == "opengl") setApi(Api::OpenGL);
-}
+Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>()) {}
 
 Canvas::~Canvas() = default;
 
 void Canvas::setImage(TileStore tiles) {
   stroke_.reset();
-  logMemory("setImage before");
   tiles_ = std::move(tiles);
-  logMemory("setImage after move");
   image_changed_ = true;
   view_.setViewportSize(QSizeF(size()));
   view_.setImageSize(tiles_.size());
@@ -281,40 +242,9 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   TracyPlot("gpu_ms", previous_gpu_seconds_ * 1000.0);
   QRhiResourceUpdateBatch* updates = rhi()->nextResourceUpdateBatch();
   if (image_changed_) {
-    logMemory("render before createTiles");
     gpu_->createTiles(tiles_, updates);
     std::ignore = tiles_.takeDirty();
     image_changed_ = false;
-    if (!gpu_->pending.empty()) update();
-    QTimer::singleShot(3000, this, [this] {
-      logMemory("3 s after createTiles");
-      if (qEnvironmentVariableIsSet("PINSEL_RELEASE_CACHE") && rhi() != nullptr) {
-        rhi()->releaseCachedResources();
-        logMemory("after releaseCachedResources");
-      }
-#ifdef _WIN32
-      if (qEnvironmentVariableIsSet("PINSEL_TRIM") && rhi() != nullptr &&
-          rhi()->backend() == QRhi::D3D11) {
-        auto* handles = static_cast<const QRhiD3D11NativeHandles*>(rhi()->nativeHandles());
-        IDXGIDevice3* dxgi = nullptr;
-        if (SUCCEEDED(static_cast<IUnknown*>(handles->dev)->QueryInterface(__uuidof(IDXGIDevice3), reinterpret_cast<void**>(&dxgi)))) {
-          dxgi->Trim();
-          dxgi->Release();
-          logMemory("after IDXGIDevice3::Trim");
-        }
-      }
-#endif
-      QTimer::singleShot(3000, this, [] { logMemory("6 s after createTiles"); });
-    });
-  } else if (!gpu_->pending.empty()) {
-    const auto count = std::min<std::size_t>(gpu_->pending.size(), static_cast<std::size_t>(uploadsPerFrame()));
-    for (std::size_t i = 0; i < count; ++i) {
-      gpu_->upload(tiles_, gpu_->pending.at(i), updates);
-    }
-    gpu_->pending.erase(gpu_->pending.begin(), gpu_->pending.begin() + static_cast<std::ptrdiff_t>(count));
-    std::ignore = tiles_.takeDirty();
-    if (gpu_->pending.empty()) logMemory("last upload queued");
-    update();
   } else {
     for (const std::size_t index : tiles_.takeDirty()) {
       gpu_->upload(tiles_, index, updates);
@@ -351,8 +281,6 @@ void Canvas::render(QRhiCommandBuffer* commands) {
     }
   }
   commands->endPass();
-  static int frames = 0;
-  if (++frames <= 3) logMemory("end of render");
 }
 
 void Canvas::releaseResources() {

@@ -10,10 +10,6 @@
 #include <QHBoxLayout>
 #include <QIcon>
 #include <QImageReader>
-#ifdef _WIN32
-#include <windows.h>
-#include <psapi.h>
-#endif
 #include <QKeySequence>
 #include <QListWidget>
 #include <QMenuBar>
@@ -66,17 +62,6 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
-void logMemory2(const char* where) {
-  if (!qEnvironmentVariableIsSet("PINSEL_MEMLOG")) return;
-#ifdef _WIN32
-  PROCESS_MEMORY_COUNTERS_EX c{};
-  GetProcessMemoryInfo(GetCurrentProcess(), reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&c), sizeof(c));
-  qWarning("MEMLOG %s private=%.1f MB", where, double(c.PrivateUsage) / 1048576.0);
-#else
-  qWarning("MEMLOG %s", where);
-#endif
-}
-
 struct Loaded {
   TileStore tiles;
   QString error;
@@ -90,9 +75,7 @@ Loaded load(const QString& path) {
   if (image.isNull()) {
     return {.tiles = {}, .error = reader.errorString()};
   }
-  logMemory2("load decoded");
   TileStore tiles(image);
-  logMemory2("load tiles cut, decoded alive");
   if (tiles.size().isEmpty()) {
     return {.tiles = {}, .error = QStringLiteral("Not enough memory to convert the image")};
   }
@@ -145,7 +128,6 @@ void MainWindow::openImage(const QString& path, std::function<void(const QString
   auto* watcher = new QFutureWatcher<Loaded>(this);
   connect(watcher, &QFutureWatcher<Loaded>::finished, this,
           [this, watcher, id, path, done = std::move(done)] {
-            logMemory2("watcher finished");
             Loaded loaded = watcher->result();
             watcher->deleteLater();
             if (id != latest_open_) {
