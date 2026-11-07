@@ -26,7 +26,7 @@ class TileStore {
 
   TileStore() = default;
   // Converts image to kFormat. Every tile starts dirty. The store stays empty
-  // when there is no memory for the conversion.
+  // when there is no memory for the conversion or the tiles.
   explicit TileStore(const QImage& image);
 
   [[nodiscard]] QSize size() const {

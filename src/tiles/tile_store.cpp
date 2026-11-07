@@ -23,7 +23,12 @@ TileStore::TileStore(const QImage& image) {
   const std::size_t count = columns_ * tilesAcross(source.height());
   tiles_.reserve(count);
   for (std::size_t index = 0; index < count; ++index) {
-    tiles_.push_back(source.copy(tileRect(index)));
+    QImage tile = source.copy(tileRect(index));
+    if (tile.isNull()) {
+      *this = TileStore();
+      return;
+    }
+    tiles_.push_back(std::move(tile));
   }
   dirty_.assign(count, true);
   saved_.assign(count, false);
