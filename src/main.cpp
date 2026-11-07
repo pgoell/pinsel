@@ -1,5 +1,6 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QSize>
 #include <QStringList>
 #include <QTimer>
 #include <string>
@@ -23,20 +24,31 @@ int main(int argc, char** argv) {
                                 QStringLiteral("size"));
   const QCommandLineOption open(QStringLiteral("open"), QStringLiteral("Open an image."),
                                 QStringLiteral("path"));
+  const QCommandLineOption blank(QStringLiteral("new"),
+                                 QStringLiteral("Start a blank white image, as WIDTHxHEIGHT."),
+                                 QStringLiteral("size"));
   parser.addOption(screenshot);
   parser.addOption(open);
+  parser.addOption(blank);
   parser.addOption(size);
   parser.process(app);
-
-  pinsel::MainWindow window;
-  if (parser.isSet(size)) {
-    const QStringList parts = parser.value(size).split(QLatin1Char('x'));
+  const auto sizeOf = [&](const QCommandLineOption& option) {
+    const QStringList parts = parser.value(option).split(QLatin1Char('x'));
     const int width = parts.value(0).toInt();
     const int height = parts.value(1).toInt();
     if (parts.size() != 2 || width <= 0 || height <= 0) {
       parser.showHelp(1);
     }
-    window.resize(width, height);
+    return QSize(width, height);
+  };
+
+  pinsel::MainWindow window;
+  if (parser.isSet(size)) {
+    window.resize(sizeOf(size));
+  }
+  if (parser.isSet(blank) && !window.newImage(sizeOf(blank), Qt::white)) {
+    qCritical("Not enough memory for the new image");
+    return 1;
   }
   if (parser.isSet(screenshot)) {
     // Lays the window out at any size, unclipped by the screen, and never shows it.

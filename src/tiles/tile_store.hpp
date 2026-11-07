@@ -3,6 +3,7 @@
 #include <QImage>
 #include <QRect>
 #include <QSize>
+#include <QString>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -74,6 +75,11 @@ class TileStore {
   bool redo();
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
+  // Names the edits behind the current pixels of both planes: undo and redo
+  // return to an earlier number, and any new edit, the open step included,
+  // gives a number never seen before. A save stores it to tell later whether
+  // anything changed.
+  [[nodiscard]] std::uint64_t revision() const;
 
   // The plane's dirty tiles in ascending order. They are clean afterwards.
   [[nodiscard]] std::vector<std::size_t> takeDirty(Plane plane = Plane::Image);
@@ -88,7 +94,11 @@ class TileStore {
     std::size_t index;
     QImage image;
   };
-  using Step = std::vector<SavedTile>;
+  struct Step {
+    // The revision this step's edit leads to.
+    std::uint64_t revision = 0;
+    std::vector<SavedTile> tiles;
+  };
 
   static std::size_t planeIndex(Plane plane) {
     return static_cast<std::size_t>(plane);
@@ -104,9 +114,26 @@ class TileStore {
   // Which tiles the open step already saved.
   PerPlane<bool> saved_;
   Step open_;
+  // The revision before the oldest step in undo_.
+  std::uint64_t base_revision_ = 0;
+  std::uint64_t last_revision_ = 0;
   std::vector<Step> undo_;
   std::vector<Step> redo_;
   std::size_t undo_budget_ = kDefaultUndoBudget;
 };
+
+struct ReadImage {
+  TileStore tiles;
+  QString error;
+};
+
+// Reads the image file at path, turned upright by its orientation tag, into a
+// store. On failure the store is empty and error says why. Slow for a large
+// image, so callers run it off the UI thread.
+ReadImage readImage(const QString& path);
+
+// Writes image as a PNG at path, through a temporary file, so a failed write
+// leaves the old file whole. Returns an empty string, or why it failed.
+QString writePng(const QImage& image, const QString& path);
 
 }  // namespace pinsel
