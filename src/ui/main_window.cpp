@@ -227,14 +227,29 @@ void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
       path_.isEmpty() ? QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
                             .filePath(QStringLiteral("Untitled.png"))
                       : current.dir().filePath(current.completeBaseName() + QStringLiteral(".png"));
-  QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Save Image"), suggested,
-                                              QStringLiteral("PNG image (*.png)"));
-  if (path.isEmpty()) {
+  QFileDialog dialog(this, QStringLiteral("Save Image"), suggested,
+                     QStringLiteral("PNG image (*.png)"));
+  dialog.setAcceptMode(QFileDialog::AcceptSave);
+  // Adds .png before the dialog's own overwrite check, so the check sees the
+  // file that will be written.
+  dialog.setDefaultSuffix(QStringLiteral("png"));
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
     done(false);
     return;
   }
+  QString path = dialog.selectedFiles().constFirst();
   if (!isPng(path)) {
+    // A name with another suffix, such as photo.jpg, gets .png on top, which
+    // the dialog never checked.
     path += QStringLiteral(".png");
+    if (QFileInfo::exists(path) &&
+        QMessageBox::question(
+            this, QStringLiteral("Save Image"),
+            QStringLiteral("%1 already exists. Replace it?").arg(QFileInfo(path).fileName())) !=
+            QMessageBox::Yes) {
+      done(false);
+      return;
+    }
   }
   saveTo(path, done);
 }
