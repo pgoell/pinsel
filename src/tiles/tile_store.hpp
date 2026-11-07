@@ -27,7 +27,8 @@ class TileStore {
 
   TileStore() = default;
   // Converts image to kFormat. Every tile starts dirty. The store stays empty
-  // when there is no memory for the conversion or the tiles.
+  // when there is no memory for the tiles. At its peak the store needs memory
+  // for the tiles and one more tile on top of image.
   explicit TileStore(const QImage& image);
 
   [[nodiscard]] QSize size() const {
@@ -51,6 +52,9 @@ class TileStore {
   // undo keeps fit the budget, but always keeps the newest step.
   void commit();
   void setUndoBudget(std::size_t bytes);
+  // The pixels of the tiles, and of the tiles that undo keeps.
+  [[nodiscard]] std::size_t bytes() const;
+  [[nodiscard]] std::size_t undoBytes() const;
   // Each first commits the open step. They return false when there is no step.
   bool undo();
   bool redo();

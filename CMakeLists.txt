@@ -97,12 +97,17 @@ if(BUILD_TESTING)
   set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
   file(MAKE_DIRECTORY ${SHOTS})
 
-  add_executable(tests tests/test_brush.cpp tests/test_canvas.cpp tests/test_project.cpp
+  add_executable(tests tests/test_brush.cpp tests/test_canvas.cpp tests/test_memory.cpp
+                       tests/test_project.cpp
                        tests/test_tile_store.cpp tests/test_view.cpp)
   target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-brush pinsel-tiles
                                       GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
   target_compile_definitions(tests PRIVATE PINSEL_SCREENSHOTS="${SHOTS}")
+  # The load peak test reads the heap through AddressSanitizer's allocator.
+  if(SANITIZE)
+    target_compile_definitions(tests PRIVATE PINSEL_ASAN)
+  endif()
   include(GoogleTest)
   # The canvas tests make a QApplication; listing the tests makes none.
   if(WIN32)

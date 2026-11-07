@@ -15,17 +15,19 @@ std::size_t tilesAcross(int pixels) {
 }  // namespace
 
 TileStore::TileStore(const QImage& image) {
-  const QImage source = image.convertToFormat(kFormat);
-  if (source.isNull()) {
+  if (image.isNull()) {
     return;
   }
-  size_ = source.size();
-  columns_ = tilesAcross(source.width());
-  const std::size_t count = columns_ * tilesAcross(source.height());
+  size_ = image.size();
+  columns_ = tilesAcross(image.width());
+  const std::size_t count = columns_ * tilesAcross(image.height());
   tiles_.reserve(count);
   for (std::size_t index = 0; index < count; ++index) {
-    QImage tile = source.copy(tileRect(index));
-    if (tile.isNull()) {
+    // Converting tile by tile, not the whole image first, keeps the peak at the
+    // source plus the tiles. The 32-bit formats convert in place.
+    QImage tile = image.copy(tileRect(index));
+    tile.convertTo(kFormat);
+    if (tile.isNull() || tile.format() != kFormat) {
       *this = TileStore();
       return;
     }
@@ -95,13 +97,26 @@ void TileStore::setUndoBudget(std::size_t bytes) {
   trimUndo();
 }
 
-void TileStore::trimUndo() {
+std::size_t TileStore::bytes() const {
+  std::size_t bytes = 0;
+  for (const QImage& tile : tiles_) {
+    bytes += static_cast<std::size_t>(tile.sizeInBytes());
+  }
+  return bytes;
+}
+
+std::size_t TileStore::undoBytes() const {
   std::size_t bytes = 0;
   for (const Step& step : undo_) {
     for (const SavedTile& saved : step) {
       bytes += static_cast<std::size_t>(saved.image.sizeInBytes());
     }
   }
+  return bytes;
+}
+
+void TileStore::trimUndo() {
+  std::size_t bytes = undoBytes();
   std::size_t dropped = 0;
   while (bytes > undo_budget_ && undo_.size() - dropped > 1) {
     for (const SavedTile& saved : undo_.at(dropped)) {
