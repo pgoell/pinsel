@@ -297,6 +297,7 @@ void Canvas::mousePressEvent(QMouseEvent* event) {
   const bool pan = event->button() == Qt::MiddleButton ||
                    (event->button() == Qt::LeftButton && tool_ == Tool::Pan);
   if (pan) {
+    pan_button_ = event->button();
     drag_from_ = event->position();
   } else if (event->button() == Qt::LeftButton && (tool_ == Tool::Brush || tool_ == Tool::Eraser) &&
              tiles_.tileCount() > 0) {
@@ -309,9 +310,7 @@ void Canvas::mousePressEvent(QMouseEvent* event) {
 }
 
 void Canvas::mouseMoveEvent(QMouseEvent* event) {
-  const bool pan = event->buttons().testFlag(Qt::MiddleButton) ||
-                   (event->buttons().testFlag(Qt::LeftButton) && tool_ == Tool::Pan);
-  if (pan) {
+  if (pan_button_) {
     view_.panBy(event->position() - drag_from_);
     drag_from_ = event->position();
     update();
@@ -322,6 +321,9 @@ void Canvas::mouseMoveEvent(QMouseEvent* event) {
 }
 
 void Canvas::mouseReleaseEvent(QMouseEvent* event) {
+  if (event->button() == pan_button_) {
+    pan_button_.reset();
+  }
   if (event->button() == Qt::LeftButton) {
     endStroke();
   }

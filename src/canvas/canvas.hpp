@@ -72,6 +72,7 @@ class Canvas : public QRhiWidget {
   TileStore tiles_;
   bool image_changed_ = false;
   View view_;
+  std::optional<Qt::MouseButton> pan_button_;
   QPointF drag_from_;
   Tool tool_ = Tool::Brush;
   BrushSettings brush_;

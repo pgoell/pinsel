@@ -201,7 +201,7 @@ void MainWindow::addPanels() {
                  brush_.size = value;
                  canvas_->setBrush(brush_);
                });
-  addSliderRow(form, QStringLiteral("Opacity"), {.min = 0, .max = 100, .value = 100},
+  addSliderRow(form, QStringLiteral("Opacity"), {.min = 1, .max = 100, .value = 100},
                QStringLiteral(" %"), [this](int value) {
                  brush_.opacity = value / 100.0;
                  canvas_->setBrush(brush_);
