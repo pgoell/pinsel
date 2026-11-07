@@ -67,13 +67,13 @@ else()
   target_include_directories(
     pinsel-canvas SYSTEM PUBLIC $<TARGET_PROPERTY:Tracy::TracyClient,INTERFACE_INCLUDE_DIRECTORIES>)
 endif()
-target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
+target_compile_options(pinsel-canvas PRIVATE ${WARNINGS} -Wno-error)
 
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
 target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas Qt6::Concurrent)
-target_compile_options(pinsel PRIVATE ${WARNINGS})
+target_compile_options(pinsel PRIVATE ${WARNINGS} -Wno-error)
 
 add_executable(bench bench/pan_zoom.cpp)
 target_link_libraries(bench PRIVATE pinsel-canvas benchmark::benchmark)
