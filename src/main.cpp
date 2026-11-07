@@ -21,7 +21,10 @@ int main(int argc, char** argv) {
   const QCommandLineOption size(QStringLiteral("size"),
                                 QStringLiteral("Window size, as WIDTHxHEIGHT."),
                                 QStringLiteral("size"));
+  const QCommandLineOption open(QStringLiteral("open"), QStringLiteral("Open an image."),
+                                QStringLiteral("path"));
   parser.addOption(screenshot);
+  parser.addOption(open);
   parser.addOption(size);
   parser.process(app);
 
@@ -40,10 +43,20 @@ int main(int argc, char** argv) {
     window.setAttribute(Qt::WA_DontShowOnScreen);
   }
   window.show();
-  if (parser.isSet(screenshot)) {
-    QTimer::singleShot(0, &window, [&] {
-      QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
+  const auto saveScreenshot = [&] {
+    QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
+  };
+  if (parser.isSet(open)) {
+    window.openImage(parser.value(open), [&](const QString& error) {
+      if (!error.isEmpty()) {
+        qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
+        QApplication::exit(1);
+      } else if (parser.isSet(screenshot)) {
+        saveScreenshot();
+      }
     });
+  } else if (parser.isSet(screenshot)) {
+    QTimer::singleShot(0, &window, saveScreenshot);
   }
   return QApplication::exec();
 }

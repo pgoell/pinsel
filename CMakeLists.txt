@@ -31,7 +31,9 @@ elseif(SANITIZE)
 endif()
 
 # Svg is never linked, but its icon plugin draws the tool icons; without it they stay blank.
-find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg)
+# QRhi, which the canvas draws with, is in Qt's private Gui module, which warns on use.
+set(QT_NO_PRIVATE_MODULE_WARNING ON)
+find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg Concurrent GuiPrivate ShaderTools)
 qt_standard_project_setup()
 find_package(benchmark CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
@@ -43,9 +45,11 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
-add_library(pinsel-canvas src/canvas/canvas.cpp)
+add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
-target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets)
+target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets PRIVATE Qt6::GuiPrivate)
+qt_add_shaders(pinsel-canvas shaders PREFIX /shaders BASE src/canvas
+               FILES src/canvas/canvas.vert src/canvas/canvas.frag)
 # The Tracy client defines TRACY_ENABLE for everything that links it. Without it,
 # Tracy's header turns every macro into nothing, so code can mark zones in every build.
 if(PINSEL_TRACY)
@@ -59,7 +63,7 @@ target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/theme.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
-target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas)
+target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas Qt6::Concurrent)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
 add_executable(bench bench/pan_zoom.cpp)
@@ -80,8 +84,8 @@ if(BUILD_TESTING)
   set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
   FetchContent_MakeAvailable(googletest)
 
-  add_executable(tests tests/test_project.cpp)
-  target_link_libraries(tests PRIVATE pinsel-lib GTest::gtest_main)
+  add_executable(tests tests/test_project.cpp tests/test_view.cpp)
+  target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
   include(GoogleTest)
   gtest_discover_tests(tests)
@@ -90,13 +94,16 @@ if(BUILD_TESTING)
   add_test(NAME bench_smoke COMMAND bench --benchmark_min_time=1x)
 
   # CI posts every PNG these write to the pull request: a 1080p screen, and a 4K
-  # screen at 200% scaling.
+  # screen at 200% scaling. The image spans several tiles, so a seam would show.
   set(SHOTS ${CMAKE_BINARY_DIR}/screenshots)
+  set(PATTERN ${CMAKE_SOURCE_DIR}/tests/data/pattern.png)
   file(MAKE_DIRECTORY ${SHOTS})
   add_test(NAME screenshot_1080p
-           COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080)
+           COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080
+                   --open ${PATTERN})
   add_test(NAME screenshot_4k
-           COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080)
+           COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080
+                   --open ${PATTERN})
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
   set_property(TEST screenshot_1080p screenshot_4k PROPERTY ENVIRONMENT_MODIFICATION

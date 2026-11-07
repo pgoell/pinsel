@@ -1,17 +1,56 @@
 #pragma once
 
-#include <QWidget>
+#include <QImage>
+#include <QPointF>
+#include <QRhiWidget>
+#include <memory>
+
+#include "canvas/view.hpp"
 
 namespace pinsel {
 
-// A placeholder until milestone 1, when this becomes a QRhiWidget that draws the image as GPU tiles
-// and pans and zooms a 4K image at 60 fps or more.
-class Canvas : public QWidget {
+// Draws the image as GPU tiles. The middle mouse button pans and the wheel zooms
+// at the cursor.
+class Canvas : public QRhiWidget {
  public:
   explicit Canvas(QWidget* parent = nullptr);
+  ~Canvas() override;
+  Canvas(const Canvas&) = delete;
+  Canvas& operator=(const Canvas&) = delete;
+  Canvas(Canvas&&) = delete;
+  Canvas& operator=(Canvas&&) = delete;
+
+  // The texture format. setImage converts any other format, on the calling thread.
+  static constexpr QImage::Format kImageFormat = QImage::Format_RGBA8888_Premultiplied;
+
+  // QRhiWidget's render(QRhiCommandBuffer*) hides these.
+  using QWidget::render;
+
+  void setImage(const QImage& image);
+  void zoomIn();
+  void zoomOut();
+  void fitToWindow();
 
  protected:
-  void paintEvent(QPaintEvent* event) override;
+  void initialize(QRhiCommandBuffer* commands) override;
+  void render(QRhiCommandBuffer* commands) override;
+  void releaseResources() override;
+
+  void resizeEvent(QResizeEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void mouseMoveEvent(QMouseEvent* event) override;
+  void wheelEvent(QWheelEvent* event) override;
+
+ private:
+  struct Gpu;
+
+  void zoomAtCentre(double factor);
+
+  std::unique_ptr<Gpu> gpu_;
+  QImage image_;
+  bool image_changed_ = false;
+  View view_;
+  QPointF drag_from_;
 };
 
 }  // namespace pinsel

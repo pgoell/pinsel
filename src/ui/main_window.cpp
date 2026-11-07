@@ -3,17 +3,23 @@
 #include <QActionGroup>
 #include <QApplication>
 #include <QDockWidget>
+#include <QFileDialog>
 #include <QFormLayout>
+#include <QFutureWatcher>
 #include <QHBoxLayout>
 #include <QIcon>
+#include <QImageReader>
 #include <QKeySequence>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QSlider>
 #include <QSpinBox>
 #include <QToolBar>
+#include <QtConcurrentRun>
 #include <array>
 #include <tuple>
+#include <utility>
 
 #include "canvas/canvas.hpp"
 
@@ -48,12 +54,33 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
+struct Loaded {
+  QImage image;
+  QString error;
+};
+
+// Runs on a pool thread. Converts to the canvas's format here, so setImage has
+// nothing left to convert on the UI thread.
+Loaded load(const QString& path) {
+  QImageReader reader(path);
+  reader.setAutoTransform(true);
+  const QImage image = reader.read();
+  if (image.isNull()) {
+    return {.image = {}, .error = reader.errorString()};
+  }
+  QImage converted = image.convertToFormat(Canvas::kImageFormat);
+  if (converted.isNull()) {
+    return {.image = {}, .error = QStringLiteral("Not enough memory to convert the image")};
+  }
+  return {.image = std::move(converted), .error = {}};
+}
+
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
+MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), canvas_(new Canvas(this)) {
   setWindowTitle(QApplication::applicationName());
   resize(1280, 800);
-  setCentralWidget(new Canvas(this));
+  setCentralWidget(canvas_);
   addMenus();
   addTools();
   addPanels();
@@ -62,7 +89,7 @@ MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent) {
 void MainWindow::addMenus() {
   // Actions stay disabled until the feature behind them exists.
   QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
-  file->addAction(QStringLiteral("&Open..."), QKeySequence::Open)->setEnabled(false);
+  file->addAction(QStringLiteral("&Open..."), QKeySequence::Open, this, &MainWindow::chooseImage);
   file->addAction(QStringLiteral("&Save"), QKeySequence::Save)->setEnabled(false);
   file->addAction(QStringLiteral("Save &As..."), QKeySequence::SaveAs)->setEnabled(false);
   file->addSeparator();
@@ -73,11 +100,50 @@ void MainWindow::addMenus() {
   edit->addAction(QStringLiteral("&Redo"), QKeySequence::Redo)->setEnabled(false);
 
   view_menu_ = menuBar()->addMenu(QStringLiteral("&View"));
-  view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn)->setEnabled(false);
-  view_menu_->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut)->setEnabled(false);
-  view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0))
-      ->setEnabled(false);
+  view_menu_->addAction(QStringLiteral("Zoom &In"), QKeySequence::ZoomIn, canvas_, &Canvas::zoomIn);
+  view_menu_->addAction(QStringLiteral("Zoom &Out"), QKeySequence::ZoomOut, canvas_,
+                        &Canvas::zoomOut);
+  view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0),
+                        canvas_, &Canvas::fitToWindow);
   view_menu_->addSeparator();
+}
+
+void MainWindow::openImage(const QString& path, std::function<void(const QString& error)> done) {
+  const int id = ++latest_open_;
+  auto* watcher = new QFutureWatcher<Loaded>(this);
+  connect(watcher, &QFutureWatcher<Loaded>::finished, this,
+          [this, watcher, id, path, done = std::move(done)] {
+            const Loaded loaded = watcher->result();
+            watcher->deleteLater();
+            if (id != latest_open_) {
+              return;
+            }
+            if (!loaded.image.isNull()) {
+              canvas_->setImage(loaded.image);
+              setWindowFilePath(path);
+            }
+            done(loaded.error);
+          });
+  watcher->setFuture(QtConcurrent::run(load, path));
+}
+
+void MainWindow::chooseImage() {
+  QStringList patterns;
+  for (const QByteArray& format : QImageReader::supportedImageFormats()) {
+    patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
+  }
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("Open Image"), QString(),
+      QStringLiteral("Images (%1)").arg(patterns.join(QLatin1Char(' '))));
+  if (path.isEmpty()) {
+    return;
+  }
+  openImage(path, [this, path](const QString& error) {
+    if (!error.isEmpty()) {
+      QMessageBox::warning(this, QStringLiteral("Open Image"),
+                           QStringLiteral("Could not open %1: %2").arg(path, error));
+    }
+  });
 }
 
 void MainWindow::addTools() {
