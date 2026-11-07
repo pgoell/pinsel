@@ -4,6 +4,8 @@
 #include <QString>
 #include <functional>
 
+#include "brush/brush.hpp"
+
 namespace pinsel {
 
 class Canvas;
@@ -24,6 +26,7 @@ class MainWindow : public QMainWindow {
   void addPanels();
 
   Canvas* canvas_ = nullptr;
+  BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;
 };

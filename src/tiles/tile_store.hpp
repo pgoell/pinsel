@@ -23,6 +23,7 @@ class TileStore {
   static constexpr int kTileSize = 512;
   // RGBA8 textures take bytes in this order on every GPU backend.
   static constexpr QImage::Format kFormat = QImage::Format_RGBA8888_Premultiplied;
+  static constexpr std::size_t kDefaultUndoBudget = std::size_t{1} << 30U;
 
   TileStore() = default;
   // Converts image to kFormat. Every tile starts dirty. The store stays empty
@@ -41,12 +42,15 @@ class TileStore {
   }
   [[nodiscard]] QImage toImage() const;
 
-  // Calls draw once for each tile under area, with a painter in image pixels
-  // that is clipped to area and to the tile. The change joins the open undo step.
-  void paint(QRect area, const std::function<void(QPainter&)>& draw);
+  // Calls draw once for each tile under area, with the tile's index and a
+  // painter in image pixels that is clipped to area and to the tile. The change
+  // joins the open undo step.
+  void paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw);
   // Closes the open undo step, if anything changed since the last one, and
-  // drops the redo steps.
+  // drops the redo steps. Then drops the oldest steps until the tiles that
+  // undo keeps fit the budget, but always keeps the newest step.
   void commit();
+  void setUndoBudget(std::size_t bytes);
   // Each first commits the open step. They return false when there is no step.
   bool undo();
   bool redo();
@@ -64,6 +68,7 @@ class TileStore {
   using Step = std::vector<SavedTile>;
 
   void swapIn(Step& step);
+  void trimUndo();
 
   QSize size_;
   std::size_t columns_ = 0;
@@ -74,6 +79,7 @@ class TileStore {
   Step open_;
   std::vector<Step> undo_;
   std::vector<Step> redo_;
+  std::size_t undo_budget_ = kDefaultUndoBudget;
 };
 
 }  // namespace pinsel

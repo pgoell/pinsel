@@ -154,16 +154,55 @@ Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>
 Canvas::~Canvas() = default;
 
 void Canvas::setImage(TileStore tiles) {
+  stroke_.reset();
   tiles_ = std::move(tiles);
   image_changed_ = true;
   view_.setViewportSize(QSizeF(size()));
   view_.setImageSize(tiles_.size());
   update();
+  historyChanged();
 }
 
-void Canvas::edit(const std::function<void(TileStore&)>& change) {
-  change(tiles_);
+void Canvas::setTool(Tool tool) {
+  endStroke();
+  tool_ = tool;
+}
+
+void Canvas::setBrush(const BrushSettings& brush) {
+  brush_ = brush;
+}
+
+void Canvas::undo() {
+  endStroke();
+  tiles_.undo();
   update();
+  historyChanged();
+}
+
+void Canvas::redo() {
+  endStroke();
+  tiles_.redo();
+  update();
+  historyChanged();
+}
+
+void Canvas::setHistoryChanged(std::function<void()> changed) {
+  history_changed_ = std::move(changed);
+}
+
+void Canvas::historyChanged() const {
+  if (history_changed_) {
+    history_changed_();
+  }
+}
+
+void Canvas::endStroke() {
+  if (!stroke_) {
+    return;
+  }
+  stroke_.reset();
+  tiles_.commit();
+  historyChanged();
 }
 
 void Canvas::zoomIn() {
@@ -255,16 +294,36 @@ void Canvas::resizeEvent(QResizeEvent* event) {
 }
 
 void Canvas::mousePressEvent(QMouseEvent* event) {
-  if (event->button() == Qt::MiddleButton) {
+  const bool pan = event->button() == Qt::MiddleButton ||
+                   (event->button() == Qt::LeftButton && tool_ == Tool::Pan);
+  if (pan) {
     drag_from_ = event->position();
+  } else if (event->button() == Qt::LeftButton && (tool_ == Tool::Brush || tool_ == Tool::Eraser) &&
+             tiles_.tileCount() > 0) {
+    BrushSettings brush = brush_;
+    brush.erase = tool_ == Tool::Eraser;
+    stroke_.emplace(tiles_, brush);
+    stroke_->moveTo(view_.toImage(event->position()));
+    update();
   }
 }
 
 void Canvas::mouseMoveEvent(QMouseEvent* event) {
-  if (event->buttons().testFlag(Qt::MiddleButton)) {
+  const bool pan = event->buttons().testFlag(Qt::MiddleButton) ||
+                   (event->buttons().testFlag(Qt::LeftButton) && tool_ == Tool::Pan);
+  if (pan) {
     view_.panBy(event->position() - drag_from_);
     drag_from_ = event->position();
     update();
+  } else if (stroke_) {
+    stroke_->moveTo(view_.toImage(event->position()));
+    update();
+  }
+}
+
+void Canvas::mouseReleaseEvent(QMouseEvent* event) {
+  if (event->button() == Qt::LeftButton) {
+    endStroke();
   }
 }
 
