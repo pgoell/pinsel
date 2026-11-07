@@ -62,9 +62,6 @@ QImage TileStore::toImage(Plane plane) const {
 void TileStore::save(Plane plane, std::size_t index) {
   std::vector<bool>& saved = saved_.at(planeIndex(plane));
   if (!saved.at(index)) {
-    if (open_.tiles.empty()) {
-      open_.revision = ++last_revision_;
-    }
     open_.tiles.push_back({.plane = plane, .index = index, .image = tile(index, plane)});
     saved.at(index) = true;
   }
@@ -76,6 +73,7 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_
   if (bounded.isEmpty()) {
     return;
   }
+  open_.revision = ++last_revision_;
   const auto first_column = static_cast<std::size_t>(bounded.left() / kTileSize);
   const auto last_column = static_cast<std::size_t>(bounded.right() / kTileSize);
   const auto first_row = static_cast<std::size_t>(bounded.top() / kTileSize);
@@ -120,6 +118,9 @@ void TileStore::clearMask() {
       mask.at(index) = QImage();
       dirty_.at(planeIndex(Plane::Mask)).at(index) = true;
     }
+  }
+  if (!open_.tiles.empty()) {
+    open_.revision = ++last_revision_;
   }
   commit();
 }

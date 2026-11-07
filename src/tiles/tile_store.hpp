@@ -76,8 +76,8 @@ class TileStore {
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
   // Names the edits behind the current pixels of both planes: undo and redo
-  // return to an earlier number, and any new edit, the open step included,
-  // gives a number never seen before. A save stores it to tell later whether
+  // return to an earlier number, and each paint call, even one that joins the
+  // open step, gives a number never seen before. A save stores it to tell later whether
   // anything changed.
   [[nodiscard]] std::uint64_t revision() const;
 
@@ -95,7 +95,7 @@ class TileStore {
     QImage image;
   };
   struct Step {
-    // The revision this step's edit leads to.
+    // The revision of the step's latest paint.
     std::uint64_t revision = 0;
     std::vector<SavedTile> tiles;
   };

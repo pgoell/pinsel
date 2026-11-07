@@ -287,6 +287,16 @@ TEST(TileStore, RevisionChangesWithEachEditAndComesBackWithUndo) {
   EXPECT_EQ(store.revision(), painting);
 }
 
+TEST(TileStore, EachPaintInTheOpenStepGetsANewRevision) {
+  TileStore store = cleanStore();
+  fill(store, QRect(0, 0, 10, 10), Qt::red);
+  const auto mid_stroke = store.revision();
+  fill(store, QRect(10, 0, 10, 10), Qt::red);
+  EXPECT_NE(store.revision(), mid_stroke);
+  store.commit();
+  EXPECT_NE(store.revision(), mid_stroke);
+}
+
 TEST(TileStore, ANewEditAfterUndoGetsARevisionNeverSeenBefore) {
   TileStore store = cleanStore();
   fill(store, QRect(0, 0, 10, 10), Qt::red);
