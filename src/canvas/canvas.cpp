@@ -8,14 +8,16 @@
 #include <QWheelEvent>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <tracy/Tracy.hpp>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace pinsel {
 
 namespace {
 
-constexpr int kTileSize = 512;
 constexpr double kZoomStep = 1.25;
 constexpr double kWheelNotch = 120.0;
 // Per vertex: x and y in image pixels, then u and v in the tile.
@@ -113,28 +115,23 @@ struct Canvas::Gpu {
     pipeline->create();
   }
 
-  void uploadTiles(const QImage& image, QRhiResourceUpdateBatch* updates) {
+  // Makes a texture for each tile and uploads them all.
+  void createTiles(const TileStore& store, QRhiResourceUpdateBatch* updates) {
     ZoneScoped;
     tiles.clear();
     vertices.reset();
     std::vector<float> data;
-    for (int y = 0; y < image.height(); y += kTileSize) {
-      for (int x = 0; x < image.width(); x += kTileSize) {
-        Tile tile;
-        tile.rect = QRect(x, y, kTileSize, kTileSize).intersected(image.rect());
-        tile.texture.reset(
-            rhi->newTexture(QRhiTexture::RGBA8, tile.rect.size(), 1,
-                            QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
-        tile.texture->create();
-        QRhiTextureSubresourceUploadDescription source(image);
-        source.setSourceTopLeft(tile.rect.topLeft());
-        source.setSourceSize(tile.rect.size());
-        updates->uploadTexture(tile.texture.get(), QRhiTextureUploadEntry(0, 0, source));
-        updates->generateMips(tile.texture.get());
-        tile.bindings = bind(tile.texture.get());
-        appendQuad(data, tile.rect);
-        tiles.push_back(std::move(tile));
-      }
+    for (std::size_t index = 0; index < store.tileCount(); ++index) {
+      Tile tile;
+      tile.rect = store.tileRect(index);
+      tile.texture.reset(
+          rhi->newTexture(QRhiTexture::RGBA8, tile.rect.size(), 1,
+                          QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
+      tile.texture->create();
+      tile.bindings = bind(tile.texture.get());
+      appendQuad(data, tile.rect);
+      tiles.push_back(std::move(tile));
+      upload(store, index, updates);
     }
     if (data.empty()) {
       return;
@@ -144,18 +141,29 @@ struct Canvas::Gpu {
     vertices->create();
     updates->uploadStaticBuffer(vertices.get(), data.data());
   }
+
+  void upload(const TileStore& store, std::size_t index, QRhiResourceUpdateBatch* updates) {
+    QRhiTexture* texture = tiles.at(index).texture.get();
+    const QRhiTextureSubresourceUploadDescription source(store.tile(index));
+    updates->uploadTexture(texture, QRhiTextureUploadEntry(0, 0, source));
+    updates->generateMips(texture);
+  }
 };
 
 Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>()) {}
 
 Canvas::~Canvas() = default;
 
-void Canvas::setImage(const QImage& image) {
-  // RGBA8 textures take bytes in this order on every backend.
-  image_ = image.convertToFormat(kImageFormat);
+void Canvas::setImage(TileStore tiles) {
+  tiles_ = std::move(tiles);
   image_changed_ = true;
   view_.setViewportSize(QSizeF(size()));
-  view_.setImageSize(image_.size());
+  view_.setImageSize(tiles_.size());
+  update();
+}
+
+void Canvas::edit(const std::function<void(TileStore&)>& change) {
+  change(tiles_);
   update();
 }
 
@@ -196,8 +204,13 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   TracyPlot("gpu_ms", previous_gpu_seconds_ * 1000.0);
   QRhiResourceUpdateBatch* updates = rhi()->nextResourceUpdateBatch();
   if (image_changed_) {
-    gpu_->uploadTiles(image_, updates);
+    gpu_->createTiles(tiles_, updates);
+    std::ignore = tiles_.takeDirty();
     image_changed_ = false;
+  } else {
+    for (const std::size_t index : tiles_.takeDirty()) {
+      gpu_->upload(tiles_, index, updates);
+    }
   }
 
   // Widget pixels to clip space; the widget may draw at a higher device pixel ratio.

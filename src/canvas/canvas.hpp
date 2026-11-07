@@ -1,11 +1,12 @@
 #pragma once
 
-#include <QImage>
 #include <QPointF>
 #include <QRhiWidget>
+#include <functional>
 #include <memory>
 
 #include "canvas/view.hpp"
+#include "tiles/tile_store.hpp"
 
 namespace pinsel {
 
@@ -20,13 +21,12 @@ class Canvas : public QRhiWidget {
   Canvas(Canvas&&) = delete;
   Canvas& operator=(Canvas&&) = delete;
 
-  // The texture format. setImage converts any other format, on the calling thread.
-  static constexpr QImage::Format kImageFormat = QImage::Format_RGBA8888_Premultiplied;
-
   // QRhiWidget's render(QRhiCommandBuffer*) hides these.
   using QWidget::render;
 
-  void setImage(const QImage& image);
+  void setImage(TileStore tiles);
+  // Calls change, then redraws the tiles it marked dirty.
+  void edit(const std::function<void(TileStore&)>& change);
   void zoomIn();
   void zoomOut();
   void fitToWindow();
@@ -53,7 +53,7 @@ class Canvas : public QRhiWidget {
   void zoomAtCentre(double factor);
 
   std::unique_ptr<Gpu> gpu_;
-  QImage image_;
+  TileStore tiles_;
   bool image_changed_ = false;
   View view_;
   QPointF drag_from_;

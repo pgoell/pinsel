@@ -22,6 +22,7 @@
 #include <utility>
 
 #include "canvas/canvas.hpp"
+#include "tiles/tile_store.hpp"
 
 namespace pinsel {
 
@@ -55,24 +56,23 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
 }
 
 struct Loaded {
-  QImage image;
+  TileStore tiles;
   QString error;
 };
 
-// Runs on a pool thread. Converts to the canvas's format here, so setImage has
-// nothing left to convert on the UI thread.
+// Runs on a pool thread, so cutting the image into tiles never stalls the UI.
 Loaded load(const QString& path) {
   QImageReader reader(path);
   reader.setAutoTransform(true);
   const QImage image = reader.read();
   if (image.isNull()) {
-    return {.image = {}, .error = reader.errorString()};
+    return {.tiles = {}, .error = reader.errorString()};
   }
-  QImage converted = image.convertToFormat(Canvas::kImageFormat);
-  if (converted.isNull()) {
-    return {.image = {}, .error = QStringLiteral("Not enough memory to convert the image")};
+  TileStore tiles(image);
+  if (tiles.size().isEmpty()) {
+    return {.tiles = {}, .error = QStringLiteral("Not enough memory to convert the image")};
   }
-  return {.image = std::move(converted), .error = {}};
+  return {.tiles = std::move(tiles), .error = {}};
 }
 
 }  // namespace
@@ -118,8 +118,8 @@ void MainWindow::openImage(const QString& path, std::function<void(const QString
             if (id != latest_open_) {
               return;
             }
-            if (!loaded.image.isNull()) {
-              canvas_->setImage(loaded.image);
+            if (loaded.error.isEmpty()) {
+              canvas_->setImage(loaded.tiles);
               setWindowFilePath(path);
             }
             done(loaded.error);
