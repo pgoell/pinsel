@@ -3,7 +3,9 @@
 #include <QImage>
 #include <QRect>
 #include <QSize>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <vector>
 
@@ -15,6 +17,10 @@ namespace pinsel {
 // Tiles count from the top left, row by row. An edit marks the tiles it touches
 // as dirty until takeDirty collects them, so the canvas uploads only those.
 //
+// Each tile has two planes: the image, and a mask that marks the region
+// inpainting may change. Both planes share one undo history. A mask tile stays
+// null, and costs nothing, until something paints on it.
+//
 // Undo keeps whole tiles from before each change. QImage shares its pixels
 // between copies until one of them is written, so keeping a tile costs nothing
 // until the edit detaches it.
@@ -23,7 +29,11 @@ class TileStore {
   static constexpr int kTileSize = 512;
   // RGBA8 textures take bytes in this order on every GPU backend.
   static constexpr QImage::Format kFormat = QImage::Format_RGBA8888_Premultiplied;
+  // One byte per pixel: 0 leaves the pixel alone, 255 masks it fully.
+  static constexpr QImage::Format kMaskFormat = QImage::Format_Alpha8;
   static constexpr std::size_t kDefaultUndoBudget = std::size_t{1} << 30U;
+
+  enum class Plane : std::uint8_t { Image, Mask };
 
   TileStore() = default;
   // Converts image to kFormat. Every tile starts dirty. The store stays empty
@@ -35,24 +45,28 @@ class TileStore {
     return size_;
   }
   [[nodiscard]] std::size_t tileCount() const {
-    return tiles_.size();
+    return planes_.at(planeIndex(Plane::Image)).size();
   }
   [[nodiscard]] QRect tileRect(std::size_t index) const;
-  [[nodiscard]] const QImage& tile(std::size_t index) const {
-    return tiles_.at(index);
+  // Null for a mask tile that nothing has painted.
+  [[nodiscard]] const QImage& tile(std::size_t index, Plane plane = Plane::Image) const {
+    return planes_.at(planeIndex(plane)).at(index);
   }
-  [[nodiscard]] QImage toImage() const;
+  [[nodiscard]] QImage toImage(Plane plane = Plane::Image) const;
 
   // Calls draw once for each tile under area, with the tile's index and a
-  // painter in image pixels that is clipped to area and to the tile. The change
-  // joins the open undo step.
-  void paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw);
+  // painter in image pixels that is clipped to area and to the tile. A null
+  // mask tile becomes a clear one first. The change joins the open undo step.
+  void paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw,
+             Plane plane = Plane::Image);
+  // Empties the mask as an undo step of its own.
+  void clearMask();
   // Closes the open undo step, if anything changed since the last one, and
   // drops the redo steps. Then drops the oldest steps until the tiles that
   // undo keeps fit the budget, but always keeps the newest step.
   void commit();
   void setUndoBudget(std::size_t bytes);
-  // The pixels of the tiles, and of the tiles that undo keeps.
+  // The pixels of the tiles of both planes, and of the tiles that undo keeps.
   [[nodiscard]] std::size_t bytes() const;
   [[nodiscard]] std::size_t undoBytes() const;
   // Each first commits the open step. They return false when there is no step.
@@ -61,25 +75,34 @@ class TileStore {
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
 
-  // The dirty tiles in ascending order. They are clean afterwards.
-  [[nodiscard]] std::vector<std::size_t> takeDirty();
+  // The plane's dirty tiles in ascending order. They are clean afterwards.
+  [[nodiscard]] std::vector<std::size_t> takeDirty(Plane plane = Plane::Image);
 
  private:
+  static constexpr std::size_t kPlanes = 2;
+  template <typename T>
+  using PerPlane = std::array<std::vector<T>, kPlanes>;
+
   struct SavedTile {
+    Plane plane;
     std::size_t index;
     QImage image;
   };
   using Step = std::vector<SavedTile>;
 
+  static std::size_t planeIndex(Plane plane) {
+    return static_cast<std::size_t>(plane);
+  }
+  void save(Plane plane, std::size_t index);
   void swapIn(Step& step);
   void trimUndo();
 
   QSize size_;
   std::size_t columns_ = 0;
-  std::vector<QImage> tiles_;
-  std::vector<bool> dirty_;
-  // Which tiles the open step already saved, by tile index.
-  std::vector<bool> saved_;
+  PerPlane<QImage> planes_;
+  PerPlane<bool> dirty_;
+  // Which tiles the open step already saved.
+  PerPlane<bool> saved_;
   Step open_;
   std::vector<Step> undo_;
   std::vector<Step> redo_;

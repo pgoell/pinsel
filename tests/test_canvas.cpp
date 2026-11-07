@@ -33,16 +33,15 @@ void ensureApp() {
   std::ignore = app;
 }
 
-void sendMouse(QWidget& widget, QEvent::Type type, QPointF pos, Qt::MouseButton button,
-               Qt::MouseButtons buttons) {
-  QMouseEvent event(type, pos, widget.mapToGlobal(pos), button, buttons, Qt::NoModifier);
-  QCoreApplication::sendEvent(&widget, &event);
-}
-
-void drag(QWidget& widget, QLineF path) {
-  sendMouse(widget, QEvent::MouseButtonPress, path.p1(), Qt::LeftButton, Qt::LeftButton);
-  sendMouse(widget, QEvent::MouseMove, path.p2(), Qt::NoButton, Qt::LeftButton);
-  sendMouse(widget, QEvent::MouseButtonRelease, path.p2(), Qt::LeftButton, Qt::NoButton);
+void drag(QWidget& widget, QLineF path, Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
+  const auto send = [&](QEvent::Type type, QPointF pos, Qt::MouseButton button,
+                        Qt::MouseButtons buttons) {
+    QMouseEvent event(type, pos, widget.mapToGlobal(pos), button, buttons, modifiers);
+    QCoreApplication::sendEvent(&widget, &event);
+  };
+  send(QEvent::MouseButtonPress, path.p1(), Qt::LeftButton, Qt::LeftButton);
+  send(QEvent::MouseMove, path.p2(), Qt::NoButton, Qt::LeftButton);
+  send(QEvent::MouseButtonRelease, path.p2(), Qt::LeftButton, Qt::NoButton);
 }
 
 constexpr QLineF kAcross(50, 150, 350, 150);
@@ -66,6 +65,9 @@ class CanvasTest : public testing::Test {
   }
   [[nodiscard]] QColor at(QPoint point) const {
     return canvas_->tiles().toImage().pixelColor(point);
+  }
+  [[nodiscard]] int maskAt(QPoint point) const {
+    return canvas_->tiles().toImage(TileStore::Plane::Mask).pixelColor(point).alpha();
   }
 
  private:
@@ -104,6 +106,35 @@ TEST_F(CanvasTest, PanToolDragLeavesTheImageAlone) {
   drag(canvas(), kAcross);
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::white));
   EXPECT_FALSE(canvas().tiles().canUndo());
+}
+
+TEST_F(CanvasTest, MaskDragMasksAndLeavesTheImageAlone) {
+  canvas().setTool(Canvas::Tool::Mask);
+  drag(canvas(), kAcross);
+  EXPECT_EQ(maskAt(QPoint(200, 150)), 255);
+  EXPECT_EQ(maskAt(QPoint(200, 100)), 0);
+  EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::white));
+
+  QImage frame(kSize, QImage::Format_ARGB32_Premultiplied);
+  canvas().render(&frame);
+  EXPECT_TRUE(frame.save(QStringLiteral(PINSEL_SCREENSHOTS "/mask-stroke.png")));
+}
+
+TEST_F(CanvasTest, MaskDragWithAltUnmasks) {
+  canvas().setTool(Canvas::Tool::Mask);
+  drag(canvas(), kAcross);
+  drag(canvas(), QLineF(200, 150, 200, 150), Qt::AltModifier);
+  EXPECT_EQ(maskAt(QPoint(200, 150)), 0);
+  EXPECT_EQ(maskAt(QPoint(300, 150)), 255);
+}
+
+TEST_F(CanvasTest, EraseMaskEmptiesTheMaskAndUndoBringsItBack) {
+  canvas().setTool(Canvas::Tool::Mask);
+  drag(canvas(), kAcross);
+  canvas().eraseMask();
+  EXPECT_EQ(maskAt(QPoint(200, 150)), 0);
+  canvas().undo();
+  EXPECT_EQ(maskAt(QPoint(200, 150)), 255);
 }
 
 }  // namespace

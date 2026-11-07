@@ -195,4 +195,78 @@ TEST(TileStore, KeepsTheNewestStepEvenOverTheBudget) {
   EXPECT_TRUE(store.undo());
 }
 
+constexpr auto kMask = TileStore::Plane::Mask;
+
+void mask(TileStore& store, QRect area) {
+  store.paint(
+      area, [&](QPainter& painter, std::size_t /*tile*/) { painter.fillRect(area, Qt::black); },
+      kMask);
+}
+
+int maskAt(const TileStore& store, QPoint point) {
+  return store.toImage(kMask).pixelColor(point).alpha();
+}
+
+TEST(TileStore, MaskTilesStayNullAndCostNothingUntilPainted) {
+  TileStore store = cleanStore();
+  const std::size_t image_bytes = store.bytes();
+  EXPECT_TRUE(store.tile(0, kMask).isNull());
+  EXPECT_TRUE(store.takeDirty(kMask).empty());
+  EXPECT_EQ(maskAt(store, QPoint(5, 5)), 0);
+
+  mask(store, QRect(5, 5, 1, 1));
+  EXPECT_EQ(store.tile(0, kMask).format(), TileStore::kMaskFormat);
+  EXPECT_TRUE(store.tile(1, kMask).isNull());
+  EXPECT_EQ(store.bytes(), image_bytes + static_cast<std::size_t>(kTile * kTile));
+}
+
+TEST(TileStore, MaskAndImageKeepTheirOwnDirtyTiles) {
+  TileStore store = cleanStore();
+  mask(store, QRect(kTile + 5, 5, 1, 1));
+  EXPECT_TRUE(store.takeDirty().empty());
+  EXPECT_EQ(store.takeDirty(kMask), (Indices{1}));
+  EXPECT_EQ(at(store, QPoint(kTile + 5, 5)), QColor(Qt::white));
+  EXPECT_EQ(maskAt(store, QPoint(kTile + 5, 5)), 255);
+}
+
+TEST(TileStore, MaskAndImageShareOneUndoHistory) {
+  TileStore store = cleanStore();
+  const QPoint point(5, 5);
+  fillAndCommit(store, Qt::red);
+  mask(store, QRect(point, QSize(1, 1)));
+  store.commit();
+
+  ASSERT_TRUE(store.undo());
+  EXPECT_TRUE(store.tile(0, kMask).isNull());
+  EXPECT_EQ(store.takeDirty(kMask), (Indices{0}));
+  EXPECT_EQ(at(store, point), QColor(Qt::red));
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(at(store, point), QColor(Qt::white));
+  ASSERT_TRUE(store.redo());
+  ASSERT_TRUE(store.redo());
+  EXPECT_EQ(maskAt(store, point), 255);
+}
+
+TEST(TileStore, ClearMaskIsOneUndoStep) {
+  TileStore store = cleanStore();
+  mask(store, QRect(kTile - 5, 5, 10, 1));
+  store.commit();
+  std::ignore = store.takeDirty(kMask);
+
+  store.clearMask();
+  EXPECT_TRUE(store.tile(0, kMask).isNull());
+  EXPECT_TRUE(store.tile(1, kMask).isNull());
+  EXPECT_EQ(store.takeDirty(kMask), (Indices{0, 1}));
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(maskAt(store, QPoint(kTile, 5)), 255);
+  ASSERT_TRUE(store.undo());
+  EXPECT_FALSE(store.undo());
+}
+
+TEST(TileStore, ClearingAnEmptyMaskAddsNoStep) {
+  TileStore store = cleanStore();
+  store.clearMask();
+  EXPECT_FALSE(store.canUndo());
+}
+
 }  // namespace

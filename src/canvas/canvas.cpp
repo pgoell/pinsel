@@ -56,29 +56,36 @@ struct Canvas::Gpu {
   struct Tile {
     QRect rect;
     std::unique_ptr<QRhiTexture> texture;
+    // Null while the tile has no mask; the bindings then use empty_mask.
+    std::unique_ptr<QRhiTexture> mask;
     std::unique_ptr<QRhiShaderResourceBindings> bindings;
   };
 
   QRhi* rhi = nullptr;
   std::unique_ptr<QRhiBuffer> uniforms;
   std::unique_ptr<QRhiSampler> sampler;
+  std::unique_ptr<QRhiSampler> mask_sampler;
   // Every tile's bindings share one layout. The pipeline is made with this
   // set, so it holds a texture of its own that lives as long as the pipeline.
   std::unique_ptr<QRhiTexture> layout_texture;
   std::unique_ptr<QRhiShaderResourceBindings> layout;
+  std::unique_ptr<QRhiTexture> empty_mask;
   std::unique_ptr<QRhiGraphicsPipeline> pipeline;
   std::unique_ptr<QRhiBuffer> vertices;
   std::vector<Tile> tiles;
   // Set by a frame that uploaded a whole image, for the frame after it.
   bool trim_pending = false;
 
-  [[nodiscard]] std::unique_ptr<QRhiShaderResourceBindings> bind(QRhiTexture* texture) const {
+  [[nodiscard]] std::unique_ptr<QRhiShaderResourceBindings> bind(QRhiTexture* texture,
+                                                                 QRhiTexture* mask) const {
     std::unique_ptr<QRhiShaderResourceBindings> bindings(rhi->newShaderResourceBindings());
     bindings->setBindings({
         QRhiShaderResourceBinding::uniformBuffer(0, QRhiShaderResourceBinding::VertexStage,
                                                  uniforms.get()),
         QRhiShaderResourceBinding::sampledTexture(1, QRhiShaderResourceBinding::FragmentStage,
                                                   texture, sampler.get()),
+        QRhiShaderResourceBinding::sampledTexture(2, QRhiShaderResourceBinding::FragmentStage, mask,
+                                                  mask_sampler.get()),
     });
     bindings->create();
     return bindings;
@@ -93,9 +100,15 @@ struct Canvas::Gpu {
     sampler.reset(rhi->newSampler(QRhiSampler::Nearest, QRhiSampler::Linear, QRhiSampler::Linear,
                                   QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
     sampler->create();
+    // The mask has no mipmaps, so it may not use a sampler that reads them.
+    mask_sampler.reset(rhi->newSampler(QRhiSampler::Nearest, QRhiSampler::Linear, QRhiSampler::None,
+                                       QRhiSampler::ClampToEdge, QRhiSampler::ClampToEdge));
+    mask_sampler->create();
     layout_texture.reset(rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1)));
     layout_texture->create();
-    layout = bind(layout_texture.get());
+    empty_mask.reset(rhi->newTexture(QRhiTexture::R8, QSize(1, 1)));
+    empty_mask->create();
+    layout = bind(layout_texture.get(), empty_mask.get());
 
     pipeline.reset(rhi->newGraphicsPipeline());
     QRhiGraphicsPipeline::TargetBlend blend;
@@ -126,6 +139,11 @@ struct Canvas::Gpu {
     ZoneScoped;
     tiles.clear();
     vertices.reset();
+    // A new texture's contents are undefined until the first upload.
+    const std::array<quint8, 4> clear{};
+    updates->uploadTexture(
+        empty_mask.get(),
+        QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(clear.data(), 1)));
     std::vector<float> data;
     for (std::size_t index = 0; index < store.tileCount(); ++index) {
       Tile tile;
@@ -134,10 +152,11 @@ struct Canvas::Gpu {
           rhi->newTexture(QRhiTexture::RGBA8, tile.rect.size(), 1,
                           QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
       tile.texture->create();
-      tile.bindings = bind(tile.texture.get());
+      tile.bindings = bind(tile.texture.get(), empty_mask.get());
       appendQuad(data, tile.rect);
       tiles.push_back(std::move(tile));
       upload(store, index, updates);
+      uploadMask(store, index, updates);
     }
     if (data.empty()) {
       return;
@@ -172,6 +191,29 @@ struct Canvas::Gpu {
     updates->uploadTexture(texture, QRhiTextureUploadEntry(0, 0, source));
     updates->generateMips(texture);
   }
+
+  void uploadMask(const TileStore& store, std::size_t index, QRhiResourceUpdateBatch* updates) {
+    Tile& tile = tiles.at(index);
+    const QImage& mask = store.tile(index, TileStore::Plane::Mask);
+    if (mask.isNull()) {
+      if (tile.mask) {
+        tile.bindings = bind(tile.texture.get(), empty_mask.get());
+        tile.mask.reset();
+      }
+      return;
+    }
+    if (!tile.mask) {
+      tile.mask.reset(rhi->newTexture(QRhiTexture::R8, tile.rect.size()));
+      tile.mask->create();
+      tile.bindings = bind(tile.texture.get(), tile.mask.get());
+    }
+    // Raw bytes with a stride, since QRhi reads a QImage as four bytes a pixel.
+    QRhiTextureSubresourceUploadDescription source(mask.constBits(),
+                                                   static_cast<quint32>(mask.sizeInBytes()));
+    source.setDataStride(static_cast<quint32>(mask.bytesPerLine()));
+    source.setSourceSize(mask.size());
+    updates->uploadTexture(tile.mask.get(), QRhiTextureUploadEntry(0, 0, source));
+  }
 };
 
 Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>()) {}
@@ -195,6 +237,13 @@ void Canvas::setTool(Tool tool) {
 
 void Canvas::setBrush(const BrushSettings& brush) {
   brush_ = brush;
+}
+
+void Canvas::eraseMask() {
+  endStroke();
+  tiles_.clearMask();
+  update();
+  historyChanged();
 }
 
 void Canvas::undo() {
@@ -273,6 +322,7 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   if (image_changed_) {
     gpu_->createTiles(tiles_, updates);
     std::ignore = tiles_.takeDirty();
+    std::ignore = tiles_.takeDirty(TileStore::Plane::Mask);
     image_changed_ = false;
     gpu_->trim_pending = true;
     // Draws a second frame, even if nothing else changes, to trim in.
@@ -280,6 +330,9 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   } else {
     for (const std::size_t index : tiles_.takeDirty()) {
       gpu_->upload(tiles_, index, updates);
+    }
+    for (const std::size_t index : tiles_.takeDirty(TileStore::Plane::Mask)) {
+      gpu_->uploadMask(tiles_, index, updates);
     }
   }
 
@@ -331,11 +384,11 @@ void Canvas::mousePressEvent(QMouseEvent* event) {
   if (pan) {
     pan_button_ = event->button();
     drag_from_ = event->position();
-  } else if (event->button() == Qt::LeftButton && (tool_ == Tool::Brush || tool_ == Tool::Eraser) &&
-             tiles_.tileCount() > 0) {
+  } else if (event->button() == Qt::LeftButton && tool_ != Tool::Pan && tiles_.tileCount() > 0) {
     BrushSettings brush = brush_;
-    brush.erase = tool_ == Tool::Eraser;
-    stroke_.emplace(tiles_, brush);
+    const bool mask = tool_ == Tool::Mask;
+    brush.erase = tool_ == Tool::Eraser || (mask && event->modifiers().testFlag(Qt::AltModifier));
+    stroke_.emplace(tiles_, brush, mask ? TileStore::Plane::Mask : TileStore::Plane::Image);
     stroke_->moveTo(view_.toImage(event->position()));
     update();
   }

@@ -27,11 +27,12 @@ struct BrushSettings {
 // lays dabs along the path a quarter of the diameter apart. The stroke draws
 // its coverage into a mask per tile and composes each touched tile from that
 // mask and the tile as it was before the stroke, so opacity holds for the
-// whole stroke.
+// whole stroke. On the mask plane only coverage counts, so the color does not.
 class Stroke {
  public:
   // The store must outlive the stroke.
-  Stroke(TileStore& store, BrushSettings settings);
+  Stroke(TileStore& store, BrushSettings settings,
+         TileStore::Plane plane = TileStore::Plane::Image);
 
   // In image pixels. The first call lays the first dab.
   void moveTo(QPointF point);
@@ -41,10 +42,11 @@ class Stroke {
 
   TileStore* store_;
   BrushSettings settings_;
+  TileStore::Plane plane_;
   double spacing_;
   std::optional<QPointF> last_;
   // Tiles as they were before the stroke, and the stroke's coverage of each,
-  // null until the stroke reaches that tile.
+  // null until the stroke reaches that tile. A mask tile may be null before.
   std::vector<QImage> before_;
   std::vector<QImage> coverage_;
 };
