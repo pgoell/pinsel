@@ -159,7 +159,8 @@ struct Canvas::Gpu {
     }
     const auto* handles = static_cast<const QRhiD3D11NativeHandles*>(rhi->nativeHandles());
     Microsoft::WRL::ComPtr<IDXGIDevice3> device;
-    if (SUCCEEDED(static_cast<IUnknown*>(handles->dev)->QueryInterface(IID_PPV_ARGS(&device)))) {
+    if (SUCCEEDED(
+            Microsoft::WRL::ComPtr<IUnknown>(static_cast<IUnknown*>(handles->dev)).As(&device))) {
       device->Trim();
     }
 #endif
