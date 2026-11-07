@@ -3,7 +3,9 @@
 #include <QApplication>
 #include <QColor>
 #include <QImage>
+#include <QLineF>
 #include <QMouseEvent>
+#include <QPoint>
 #include <QPointF>
 #include <QString>
 #include <array>
@@ -37,11 +39,13 @@ void sendMouse(QWidget& widget, QEvent::Type type, QPointF pos, Qt::MouseButton 
   QCoreApplication::sendEvent(&widget, &event);
 }
 
-void drag(QWidget& widget, QPointF from, QPointF to) {
-  sendMouse(widget, QEvent::MouseButtonPress, from, Qt::LeftButton, Qt::LeftButton);
-  sendMouse(widget, QEvent::MouseMove, to, Qt::NoButton, Qt::LeftButton);
-  sendMouse(widget, QEvent::MouseButtonRelease, to, Qt::LeftButton, Qt::NoButton);
+void drag(QWidget& widget, QLineF path) {
+  sendMouse(widget, QEvent::MouseButtonPress, path.p1(), Qt::LeftButton, Qt::LeftButton);
+  sendMouse(widget, QEvent::MouseMove, path.p2(), Qt::NoButton, Qt::LeftButton);
+  sendMouse(widget, QEvent::MouseButtonRelease, path.p2(), Qt::LeftButton, Qt::NoButton);
 }
+
+constexpr QLineF kAcross(50, 150, 350, 150);
 
 class CanvasTest : public testing::Test {
  protected:
@@ -57,44 +61,49 @@ class CanvasTest : public testing::Test {
     canvas_->setBrush({.size = 20, .opacity = 1.0, .color = Qt::black, .erase = false});
   }
 
+  [[nodiscard]] Canvas& canvas() const {
+    return *canvas_;
+  }
   [[nodiscard]] QColor at(QPoint point) const {
     return canvas_->tiles().toImage().pixelColor(point);
   }
 
+ private:
   std::unique_ptr<Canvas> canvas_;
 };
 
-TEST_F(CanvasTest, BrushDragPaintsAndUndoRedoFollow) {
-  int changes = 0;
-  canvas_->setHistoryChanged([&] { ++changes; });
-  drag(*canvas_, QPointF(50, 150), QPointF(350, 150));
+TEST_F(CanvasTest, BrushDragPaintsAStroke) {
+  drag(canvas(), kAcross);
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::black));
   EXPECT_EQ(at(QPoint(200, 100)), QColor(Qt::white));
-  EXPECT_TRUE(canvas_->tiles().canUndo());
-  EXPECT_EQ(changes, 1);
 
   QImage frame(kSize, QImage::Format_ARGB32_Premultiplied);
-  canvas_->render(&frame);
-  frame.save(QStringLiteral(PINSEL_SCREENSHOTS "/brush-stroke.png"));
+  canvas().render(&frame);
+  EXPECT_TRUE(frame.save(QStringLiteral(PINSEL_SCREENSHOTS "/brush-stroke.png")));
+}
 
-  canvas_->undo();
+TEST_F(CanvasTest, UndoAndRedoTheStrokeAndReportEachChange) {
+  int changes = 0;
+  canvas().setHistoryChanged([&] { ++changes; });
+  drag(canvas(), kAcross);
+  canvas().undo();
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::white));
-  canvas_->redo();
+  canvas().redo();
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::black));
   EXPECT_EQ(changes, 3);
 }
 
 TEST_F(CanvasTest, EraserDragClears) {
-  canvas_->setTool(Canvas::Tool::Eraser);
-  drag(*canvas_, QPointF(50, 150), QPointF(350, 150));
+  canvas().setTool(Canvas::Tool::Eraser);
+  drag(canvas(), kAcross);
   EXPECT_EQ(at(QPoint(200, 150)).alpha(), 0);
 }
 
 TEST_F(CanvasTest, PanToolDragLeavesTheImageAlone) {
-  canvas_->setTool(Canvas::Tool::Pan);
-  drag(*canvas_, QPointF(50, 150), QPointF(350, 150));
+  canvas().setTool(Canvas::Tool::Pan);
+  drag(canvas(), kAcross);
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::white));
-  EXPECT_FALSE(canvas_->tiles().canUndo());
+  EXPECT_FALSE(canvas().tiles().canUndo());
 }
 
 }  // namespace

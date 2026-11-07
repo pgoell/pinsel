@@ -173,10 +173,13 @@ TEST(TileStore, DropsTheOldestStepsOverTheUndoBudget) {
   TileStore store = cleanStore();
   const auto tile_bytes = static_cast<std::size_t>(store.tile(0).sizeInBytes());
   store.setUndoBudget(2 * tile_bytes);
-  for (const QColor color : {Qt::red, Qt::green, Qt::blue}) {
+  const auto step = [&](QColor color) {
     fill(store, QRect(5, 5, 1, 1), color);
     store.commit();
-  }
+  };
+  step(Qt::red);
+  step(Qt::green);
+  step(Qt::blue);
   ASSERT_TRUE(store.undo());
   ASSERT_TRUE(store.undo());
   EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));

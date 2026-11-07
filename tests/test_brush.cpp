@@ -75,13 +75,16 @@ TEST(Stroke, EraserClearsToTransparent) {
   EXPECT_EQ(at(store, QPoint(200, 100)), QColor(Qt::white));
 }
 
+void strokeAcross(TileStore& store, QColor color) {
+  Stroke stroke(store, {.size = 20, .opacity = 1.0, .color = color, .erase = false});
+  stroke.moveTo(QPointF(100, 150));
+  stroke.moveTo(QPointF(700, 150));
+}
+
 TEST(Stroke, EachStrokeIsOneUndoStep) {
   TileStore store = whiteStore();
-  for (const QColor color : {Qt::red, Qt::blue}) {
-    Stroke stroke(store, {.size = 20, .opacity = 1.0, .color = color, .erase = false});
-    stroke.moveTo(QPointF(100, 150));
-    stroke.moveTo(QPointF(700, 150));
-  }
+  strokeAcross(store, Qt::red);
+  strokeAcross(store, Qt::blue);
   ASSERT_TRUE(store.undo());
   EXPECT_EQ(at(store, QPoint(600, 150)), QColor(Qt::red));
   ASSERT_TRUE(store.undo());
