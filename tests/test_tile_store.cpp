@@ -169,17 +169,18 @@ TEST(TileStore, PaintNamesEachTileItDrawsOn) {
   EXPECT_EQ(drawn, (Indices{0, 1, 3, 4}));
 }
 
+void fillAndCommit(TileStore& store, QColor color) {
+  fill(store, QRect(5, 5, 1, 1), color);
+  store.commit();
+}
+
 TEST(TileStore, DropsTheOldestStepsOverTheUndoBudget) {
   TileStore store = cleanStore();
   const auto tile_bytes = static_cast<std::size_t>(store.tile(0).sizeInBytes());
   store.setUndoBudget(2 * tile_bytes);
-  const auto step = [&](QColor color) {
-    fill(store, QRect(5, 5, 1, 1), color);
-    store.commit();
-  };
-  step(Qt::red);
-  step(Qt::green);
-  step(Qt::blue);
+  fillAndCommit(store, Qt::red);
+  fillAndCommit(store, Qt::green);
+  fillAndCommit(store, Qt::blue);
   ASSERT_TRUE(store.undo());
   ASSERT_TRUE(store.undo());
   EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
