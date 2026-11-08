@@ -241,15 +241,17 @@ struct StackLayer {
 struct Group {
   bool visible = true;
   double opacity = 1.0;
-  QPoint offset;
+  // Wide enough that no depth of nested offsets from the file overflows.
+  std::int64_t x = 0;
+  std::int64_t y = 0;
 };
 
 // An offset past any side pinsel opens moves a layer out of sight, so clamping
-// there changes nothing visible and keeps the sums of nested offsets in an int.
-constexpr std::int64_t kMaxOffset = 65535;
-
-int offsetBy(int outer, QStringView value) {
-  return static_cast<int>(std::clamp(std::int64_t{outer} + value.toInt(), -kMaxOffset, kMaxOffset));
+// there changes nothing visible.
+QPoint layerOffset(const Group& group) {
+  constexpr std::int64_t kMaxOffset = 65535;
+  return {static_cast<int>(std::clamp(group.x, -kMaxOffset, kMaxOffset)),
+          static_cast<int>(std::clamp(group.y, -kMaxOffset, kMaxOffset))};
 }
 
 Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
@@ -259,8 +261,8 @@ Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
       .visible = outer.visible && attributes.value(QStringLiteral("visibility")) != u"hidden",
       .opacity = outer.opacity *
                  (has_opacity && std::isfinite(opacity) ? std::clamp(opacity, 0.0, 1.0) : 1.0),
-      .offset = QPoint(offsetBy(outer.offset.x(), attributes.value(QStringLiteral("x"))),
-                       offsetBy(outer.offset.y(), attributes.value(QStringLiteral("y")))),
+      .x = outer.x + attributes.value(QStringLiteral("x")).toInt(),
+      .y = outer.y + attributes.value(QStringLiteral("y")).toInt(),
   };
 }
 
@@ -297,7 +299,7 @@ void readStack(QXmlStreamReader& xml, const Group& outer, std::vector<StackLayer
                   .opacity = group.opacity,
                   .blend = blendModeOf(attributes.value(QStringLiteral("composite-op"))),
                   .image = {},
-                  .offset = group.offset,
+                  .offset = layerOffset(group),
               },
           .src = attributes.value(QStringLiteral("src")).toString(),
           .mask = attributes.value(kNamespace, QStringLiteral("mask")) == u"true",

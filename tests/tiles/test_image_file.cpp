@@ -182,8 +182,8 @@ QString writeOtherEditorsFile(const QString& path) {
     <stack x="2147483647">
       <layer name="Odd" src="data/base.png" opacity="nan" visibility="hidden" x="1"/>
     </stack>
-    <stack name="Group" opacity="0.5" visibility="hidden" x="100" y="0">
-      <layer name="Inner" src="data/inner.png" x="10" y="20" composite-op="svg:darken"/>
+    <stack name="Group" opacity="0.5" visibility="hidden" x="-100000" y="0">
+      <layer name="Inner" src="data/inner.png" x="100110" y="20" composite-op="svg:darken"/>
     </stack>
     <layer name="Base" src="data/base.png" composite-op="svg:screen" opacity="0.75"/>
   </stack>
