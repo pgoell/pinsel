@@ -5,9 +5,11 @@
 #include <QSize>
 #include <QStringList>
 #include <QTimer>
+#include <functional>
+#include <optional>
 #include <string>
 
-#include "project.hpp"
+#include "app/project.hpp"
 #include "ui/main_window.hpp"
 #include "ui/theme.hpp"
 
@@ -29,6 +31,17 @@ QPolygonF pointsOf(QCommandLineParser& parser, const QCommandLineOption& option)
     points.append(QPointF(x, y));
   }
   return points;
+}
+
+// The option's value as WIDTHxHEIGHT. Anything else shows the help and quits.
+QSize sizeOf(QCommandLineParser& parser, const QCommandLineOption& option) {
+  const QStringList parts = parser.value(option).split(QLatin1Char('x'));
+  const int width = parts.value(0).toInt();
+  const int height = parts.value(1).toInt();
+  if (parts.size() != 2 || width <= 0 || height <= 0) {
+    parser.showHelp(1);
+  }
+  return {width, height};
 }
 
 }  // namespace
@@ -58,30 +71,25 @@ int main(int argc, char** argv) {
       QStringLiteral("lasso"),
       QStringLiteral("Fill an outline into the mask, as image points X,Y separated by spaces."),
       QStringLiteral("points"));
+  const QCommandLineOption model(
+      QStringLiteral("load-model"),
+      QStringLiteral("Load an SDXL checkpoint; a screenshot waits until the load ends."),
+      QStringLiteral("path"));
   parser.addOption(screenshot);
+  parser.addOption(model);
   parser.addOption(lasso);
   parser.addOption(layers);
   parser.addOption(open);
   parser.addOption(blank);
   parser.addOption(size);
   parser.process(app);
-  const auto sizeOf = [&](const QCommandLineOption& option) {
-    const QStringList parts = parser.value(option).split(QLatin1Char('x'));
-    const int width = parts.value(0).toInt();
-    const int height = parts.value(1).toInt();
-    if (parts.size() != 2 || width <= 0 || height <= 0) {
-      parser.showHelp(1);
-    }
-    return QSize(width, height);
-  };
-
   const QPolygonF outline = pointsOf(parser, lasso);
 
   pinsel::MainWindow window;
   if (parser.isSet(size)) {
-    window.resize(sizeOf(size));
+    window.resize(sizeOf(parser, size));
   }
-  if (parser.isSet(blank) && !window.newImage(sizeOf(blank), Qt::white)) {
+  if (parser.isSet(blank) && !window.newImage(sizeOf(parser, blank), Qt::white)) {
     qCritical("Not enough memory for the new image");
     return 1;
   }
@@ -93,9 +101,10 @@ int main(int argc, char** argv) {
     window.setAttribute(Qt::WA_DontShowOnScreen);
   }
   window.show();
-  const auto saveScreenshot = [&] {
+  const std::function<void()> saveScreenshot = [&] {
     QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
   };
+  const std::function<void()> ready = parser.isSet(screenshot) ? saveScreenshot : [] {};
   if (parser.isSet(open)) {
     window.openImage(parser.value(open), [&](const QString& error) {
       window.addLayers(layer_count);
@@ -103,12 +112,15 @@ int main(int argc, char** argv) {
       if (!error.isEmpty()) {
         qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
         QApplication::exit(1);
-      } else if (parser.isSet(screenshot)) {
-        saveScreenshot();
+      } else {
+        ready();
       }
     });
-  } else if (parser.isSet(screenshot)) {
-    QTimer::singleShot(0, &window, saveScreenshot);
+  } else if (parser.isSet(model)) {
+    window.loadModel(parser.value(model),
+                     [&](const std::optional<pinsel::EngineFailure>&) { ready(); });
+  } else {
+    QTimer::singleShot(0, &window, ready);
   }
   return QApplication::exec();
 }
