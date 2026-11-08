@@ -1,0 +1,2 @@
+# OpenRaster images are zip archives, which no person or agent edits by hand.
+**/*.ora
