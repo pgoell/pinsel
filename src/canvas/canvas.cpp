@@ -4,9 +4,12 @@
 
 #include <QMatrix4x4>
 #include <QMouseEvent>
+#include <QPainter>
+#include <QPen>
 #include <QWheelEvent>
 #include <cmath>
 #include <cstddef>
+#include <functional>
 #include <tracy/Tracy.hpp>
 #include <tuple>
 #include <utility>
@@ -20,14 +23,54 @@ namespace {
 constexpr double kZoomStep = 1.25;
 constexpr double kWheelNotch = 120.0;
 
+// A clear widget over the canvas that draws with a callback, since a
+// QRhiWidget's own frame cannot take a QPainter.
+class Overlay : public QWidget {
+ public:
+  Overlay(QWidget* parent, std::function<void(QPainter&)> draw)
+      : QWidget(parent), draw_(std::move(draw)) {
+    setAttribute(Qt::WA_TransparentForMouseEvents);
+    setAttribute(Qt::WA_NoSystemBackground);
+  }
+
+ protected:
+  void paintEvent(QPaintEvent* /*event*/) override {
+    QPainter painter(this);
+    draw_(painter);
+  }
+
+ private:
+  std::function<void(QPainter&)> draw_;
+};
+
 }  // namespace
 
-Canvas::Canvas(QWidget* parent) : QRhiWidget(parent), gpu_(std::make_unique<Gpu>()) {}
+Canvas::Canvas(QWidget* parent)
+    : QRhiWidget(parent),
+      gpu_(std::make_unique<Gpu>()),
+      outline_(new Overlay(this, [this](QPainter& painter) {
+        if (!lasso_) {
+          return;
+        }
+        QPolygonF outline;
+        outline.reserve(lasso_->size());
+        for (const QPointF& point : std::as_const(*lasso_)) {
+          outline.append((point * view_.scale()) + view_.offset());
+        }
+        // White under black dashes shows on any image.
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(QPen(Qt::white, 1.0));
+        painter.drawPolygon(outline);
+        painter.setPen(QPen(Qt::black, 1.0, Qt::DashLine));
+        painter.drawPolygon(outline);
+      })) {}
 
 Canvas::~Canvas() = default;
 
 void Canvas::setImage(TileStore tiles) {
   stroke_.reset();
+  lasso_.reset();
+  outline_->update();
   tiles_ = std::move(tiles);
   image_changed_ = true;
   view_.setViewportSize(QSizeF(size()));
@@ -75,12 +118,33 @@ void Canvas::historyChanged() const {
 }
 
 void Canvas::endStroke() {
+  if (lasso_) {
+    lasso_.reset();
+    outline_->update();
+  }
   if (!stroke_) {
     return;
   }
   stroke_.reset();
   tiles_.commit();
   historyChanged();
+}
+
+void Canvas::finishLasso() {
+  if (!lasso_) {
+    return;
+  }
+  const QPolygonF outline = std::move(*lasso_);
+  const double opacity = brush_.opacity;
+  const bool erase = lasso_erases_;
+  edit([&](TileStore& tiles) { fillMask(tiles, outline, opacity, erase); });
+}
+
+void Canvas::redraw() {
+  update();
+  if (lasso_) {
+    outline_->update();
+  }
 }
 
 void Canvas::zoomIn() {
@@ -93,12 +157,12 @@ void Canvas::zoomOut() {
 
 void Canvas::fitToWindow() {
   view_.fit();
-  update();
+  redraw();
 }
 
 void Canvas::zoomAtCentre(double factor) {
   view_.zoomAt(QPointF(width() / 2.0, height() / 2.0), factor);
-  update();
+  redraw();
 }
 
 void Canvas::initialize(QRhiCommandBuffer* /*commands*/) {
@@ -161,6 +225,7 @@ void Canvas::releaseResources() {
 
 void Canvas::resizeEvent(QResizeEvent* event) {
   view_.setViewportSize(QSizeF(size()));
+  outline_->resize(size());
   QRhiWidget::resizeEvent(event);
 }
 
@@ -170,6 +235,11 @@ void Canvas::mousePressEvent(QMouseEvent* event) {
   if (pan) {
     pan_button_ = event->button();
     drag_from_ = event->position();
+  } else if (event->button() == Qt::LeftButton && tool_ == Tool::Lasso && tiles_.tileCount() > 0) {
+    endStroke();
+    lasso_erases_ = event->modifiers().testFlag(Qt::AltModifier);
+    lasso_ = QPolygonF{view_.toImage(event->position())};
+    outline_->update();
   } else if (event->button() == Qt::LeftButton && tool_ != Tool::Pan && tiles_.tileCount() > 0) {
     BrushSettings brush = brush_;
     const bool mask = tool_ == Tool::Mask;
@@ -184,7 +254,10 @@ void Canvas::mouseMoveEvent(QMouseEvent* event) {
   if (pan_button_) {
     view_.panBy(event->position() - drag_from_);
     drag_from_ = event->position();
-    update();
+    redraw();
+  } else if (lasso_) {
+    lasso_->append(view_.toImage(event->position()));
+    outline_->update();
   } else if (stroke_) {
     stroke_->moveTo(view_.toImage(event->position()));
     update();
@@ -196,13 +269,14 @@ void Canvas::mouseReleaseEvent(QMouseEvent* event) {
     pan_button_.reset();
   }
   if (event->button() == Qt::LeftButton) {
+    finishLasso();
     endStroke();
   }
 }
 
 void Canvas::wheelEvent(QWheelEvent* event) {
   view_.zoomAt(event->position(), std::pow(kZoomStep, event->angleDelta().y() / kWheelNotch));
-  update();
+  redraw();
 }
 
 }  // namespace pinsel

@@ -3,6 +3,7 @@
 #include <QColor>
 #include <QImage>
 #include <QPointF>
+#include <QPolygonF>
 #include <QRectF>
 #include <cstddef>
 #include <optional>
@@ -50,5 +51,11 @@ class Stroke {
   std::vector<QImage> before_;
   std::vector<QImage> coverage_;
 };
+
+// Fills the closed outline, in image pixels, into the mask at the given
+// opacity, with smooth edges, as an undo step of its own. Where the outline
+// crosses itself, every enclosed part fills. With erase it clears the mask
+// there instead.
+void fillMask(TileStore& store, const QPolygonF& outline, double opacity, bool erase);
 
 }  // namespace pinsel

@@ -52,7 +52,7 @@ target_include_directories(pinsel-tiles PUBLIC src)
 target_link_libraries(pinsel-tiles PUBLIC Qt6::Gui PRIVATE ZLIB::ZLIB)
 target_compile_options(pinsel-tiles PRIVATE ${WARNINGS})
 
-add_library(pinsel-brush src/brush/brush.cpp)
+add_library(pinsel-brush src/brush/brush.cpp src/brush/lasso.cpp)
 target_link_libraries(pinsel-brush PUBLIC pinsel-tiles)
 target_compile_options(pinsel-brush PRIVATE ${WARNINGS})
 
@@ -145,13 +145,18 @@ if(BUILD_TESTING)
   add_test(NAME screenshot_new
            COMMAND pinsel --screenshot ${SHOTS}/new-image-1080p.png --size 1920x1080
                    --new 1024x1024)
+  # A star filled into the mask with the lasso; its arms overlap and still fill.
+  add_test(NAME screenshot_lasso
+           COMMAND pinsel --screenshot ${SHOTS}/lasso-mask-1080p.png --size 1920x1080
+                   --new 1024x768 --lasso "512,104 620,560 260,280 764,280 404,560")
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
   set(SCREENSHOT_TESTS screenshot_1080p screenshot_4k screenshot_new screenshot_layers
-                       screenshot_openraster)
+                       screenshot_openraster screenshot_lasso)
   set_property(TEST ${SCREENSHOT_TESTS} PROPERTY ENVIRONMENT_MODIFICATION
                QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
-  set_property(TEST screenshot_1080p screenshot_new screenshot_layers screenshot_openraster APPEND
+  set_property(TEST screenshot_1080p screenshot_new screenshot_layers screenshot_openraster
+               screenshot_lasso APPEND
                PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
   # Windows draws with its native platform to show the real style; offscreen has

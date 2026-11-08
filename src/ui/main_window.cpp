@@ -189,6 +189,10 @@ void MainWindow::addLayers(int count) {
   });
 }
 
+void MainWindow::fillMask(const QPolygonF& outline) {
+  canvas_->edit([&outline](TileStore& tiles) { pinsel::fillMask(tiles, outline, 1.0, false); });
+}
+
 void MainWindow::showImage(TileStore tiles, const QString& path) {
   canvas_->setImage(std::move(tiles));
   path_ = path;
@@ -402,6 +406,7 @@ void MainWindow::addTools() {
       std::tuple{"Brush", "brush", Qt::Key_B, Canvas::Tool::Brush},
       std::tuple{"Eraser", "eraser", Qt::Key_E, Canvas::Tool::Eraser},
       std::tuple{"Mask", "square-dashed", Qt::Key_M, Canvas::Tool::Mask},
+      std::tuple{"Lasso", "lasso", Qt::Key_L, Canvas::Tool::Lasso},
       std::tuple{"Pan", "hand", Qt::Key_H, Canvas::Tool::Pan},
   };
   for (const auto& [name, icon, key, tool] : entries) {

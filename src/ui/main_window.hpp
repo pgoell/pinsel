@@ -4,6 +4,7 @@
 #include <QFutureWatcher>
 #include <QList>
 #include <QMainWindow>
+#include <QPolygonF>
 #include <QSize>
 #include <QString>
 #include <cstdint>
@@ -34,6 +35,8 @@ class MainWindow : public QMainWindow {
   bool newImage(QSize size, const QColor& background);
   // Puts count empty layers above the current one.
   void addLayers(int count);
+  // Fills the closed outline, in image pixels, into the mask, as the lasso does.
+  void fillMask(const QPolygonF& outline);
 
  protected:
   void closeEvent(QCloseEvent* event) override;

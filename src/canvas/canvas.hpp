@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPointF>
+#include <QPolygonF>
 #include <QRhiWidget>
 #include <cstdint>
 #include <functional>
@@ -17,11 +18,13 @@ namespace pinsel {
 // with the mask as a red tint over them. The brush and eraser paint on the
 // current layer. The left
 // mouse button uses the tool, the middle button pans and the wheel zooms at the
-// cursor. The mask tool paints the mask with the brush's size and opacity, and
-// erases it while Alt is held.
+// cursor. The mask tool paints the mask with the brush's size and opacity. The
+// lasso draws an outline while the button is down and on release fills it into
+// the mask at the brush's opacity. With Alt held at the press, both erase the
+// mask instead.
 class Canvas : public QRhiWidget {
  public:
-  enum class Tool : std::uint8_t { Brush, Eraser, Mask, Pan };
+  enum class Tool : std::uint8_t { Brush, Eraser, Mask, Lasso, Pan };
 
   explicit Canvas(QWidget* parent = nullptr);
   ~Canvas() override;
@@ -38,8 +41,8 @@ class Canvas : public QRhiWidget {
     return tiles_;
   }
   void setTool(Tool tool);
-  // The brush, the eraser and the mask tool share these; only the brush uses the
-  // color.
+  // The painting tools share these; only the brush uses the color, and the
+  // lasso only the opacity.
   void setBrush(const BrushSettings& brush);
   void eraseMask();
   void undo();
@@ -75,6 +78,9 @@ class Canvas : public QRhiWidget {
 
   void zoomAtCentre(double factor);
   void endStroke();
+  void finishLasso();
+  // Draws the frame again, and the lasso's outline over it.
+  void redraw();
   void historyChanged() const;
 
   std::unique_ptr<Gpu> gpu_;
@@ -86,6 +92,10 @@ class Canvas : public QRhiWidget {
   Tool tool_ = Tool::Brush;
   BrushSettings brush_;
   std::optional<Stroke> stroke_;
+  // The outline drawn so far, in image pixels.
+  std::optional<QPolygonF> lasso_;
+  bool lasso_erases_ = false;
+  QWidget* outline_;
   std::function<void()> history_changed_;
   double previous_gpu_seconds_ = 0.0;
 };

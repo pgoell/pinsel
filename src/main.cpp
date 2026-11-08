@@ -1,5 +1,7 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QPointF>
+#include <QPolygonF>
 #include <QSize>
 #include <QStringList>
 #include <QTimer>
@@ -8,6 +10,28 @@
 #include "project.hpp"
 #include "ui/main_window.hpp"
 #include "ui/theme.hpp"
+
+namespace {
+
+// The option's value as X,Y pairs separated by spaces. Anything else shows the
+// help and quits.
+QPolygonF pointsOf(QCommandLineParser& parser, const QCommandLineOption& option) {
+  QPolygonF points;
+  for (const QString& point : parser.value(option).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
+    const QStringList xy = point.split(QLatin1Char(','));
+    bool x_ok = false;
+    bool y_ok = false;
+    const double x = xy.value(0).toDouble(&x_ok);
+    const double y = xy.value(1).toDouble(&y_ok);
+    if (xy.size() != 2 || !x_ok || !y_ok) {
+      parser.showHelp(1);
+    }
+    points.append(QPointF(x, y));
+  }
+  return points;
+}
+
+}  // namespace
 
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
@@ -30,7 +54,12 @@ int main(int argc, char** argv) {
   const QCommandLineOption layers(QStringLiteral("layers"),
                                   QStringLiteral("Add this many empty layers to the image."),
                                   QStringLiteral("count"));
+  const QCommandLineOption lasso(
+      QStringLiteral("lasso"),
+      QStringLiteral("Fill an outline into the mask, as image points X,Y separated by spaces."),
+      QStringLiteral("points"));
   parser.addOption(screenshot);
+  parser.addOption(lasso);
   parser.addOption(layers);
   parser.addOption(open);
   parser.addOption(blank);
@@ -46,6 +75,8 @@ int main(int argc, char** argv) {
     return QSize(width, height);
   };
 
+  const QPolygonF outline = pointsOf(parser, lasso);
+
   pinsel::MainWindow window;
   if (parser.isSet(size)) {
     window.resize(sizeOf(size));
@@ -56,6 +87,7 @@ int main(int argc, char** argv) {
   }
   const int layer_count = parser.value(layers).toInt();
   window.addLayers(layer_count);
+  window.fillMask(outline);
   if (parser.isSet(screenshot)) {
     // Lays the window out at any size, unclipped by the screen, and never shows it.
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -67,6 +99,7 @@ int main(int argc, char** argv) {
   if (parser.isSet(open)) {
     window.openImage(parser.value(open), [&](const QString& error) {
       window.addLayers(layer_count);
+      window.fillMask(outline);
       if (!error.isEmpty()) {
         qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
         QApplication::exit(1);

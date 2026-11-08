@@ -13,6 +13,8 @@
 #include <algorithm>
 #include <array>
 #include <cstdlib>
+#include <initializer_list>
+#include <iterator>
 #include <memory>
 #include <tuple>
 
@@ -49,6 +51,31 @@ void drag(QWidget& widget, QLineF path, Qt::KeyboardModifiers modifiers = Qt::No
 }
 
 constexpr QLineF kAcross(50, 150, 350, 150);
+
+// Presses at the first point, moves through the rest and releases at the last,
+// unless asked to stay pressed.
+void lasso(QWidget& widget, std::initializer_list<QPointF> points,
+           Qt::KeyboardModifiers modifiers = Qt::NoModifier, bool release = true) {
+  const auto send = [&](QEvent::Type type, QPointF pos, Qt::MouseButton button,
+                        Qt::MouseButtons buttons) {
+    QMouseEvent event(type, pos, widget.mapToGlobal(pos), button, buttons, modifiers);
+    QCoreApplication::sendEvent(&widget, &event);
+  };
+  send(QEvent::MouseButtonPress, *points.begin(), Qt::LeftButton, Qt::LeftButton);
+  for (const QPointF& point : points) {
+    send(QEvent::MouseMove, point, Qt::NoButton, Qt::LeftButton);
+  }
+  if (release) {
+    send(QEvent::MouseButtonRelease, *std::prev(points.end()), Qt::LeftButton, Qt::NoButton);
+  }
+}
+
+constexpr std::initializer_list<QPointF> kBox{
+    QPointF(100, 100),
+    QPointF(300, 100),
+    QPointF(300, 250),
+    QPointF(100, 250),
+};
 
 // Of any color channel, over every pixel of two images of one size.
 int largestDifference(const QImage& one, const QImage& other) {
@@ -148,6 +175,44 @@ TEST_F(CanvasTest, MaskDragWithAltUnmasks) {
   drag(canvas(), QLineF(200, 150, 200, 150), Qt::AltModifier);
   EXPECT_EQ(maskAt(QPoint(200, 150)), 0);
   EXPECT_EQ(maskAt(QPoint(300, 150)), 255);
+}
+
+TEST_F(CanvasTest, LassoFillsTheOutlineIntoTheMaskAsOneStep) {
+  canvas().setTool(Canvas::Tool::Lasso);
+  lasso(canvas(), kBox);
+  EXPECT_EQ(maskAt(QPoint(200, 175)), 255);
+  EXPECT_EQ(maskAt(QPoint(50, 175)), 0);
+  EXPECT_EQ(maskAt(QPoint(200, 280)), 0);
+  EXPECT_EQ(at(QPoint(200, 175)), QColor(Qt::white));
+  canvas().undo();
+  EXPECT_EQ(maskAt(QPoint(200, 175)), 0);
+  EXPECT_FALSE(canvas().tiles().canUndo());
+}
+
+TEST_F(CanvasTest, LassoWithAltUnmasks) {
+  canvas().setTool(Canvas::Tool::Lasso);
+  lasso(canvas(), kBox);
+  lasso(canvas(), {QPointF(150, 150), QPointF(250, 150), QPointF(250, 200), QPointF(150, 200)},
+        Qt::AltModifier);
+  EXPECT_EQ(maskAt(QPoint(200, 175)), 0);
+  EXPECT_EQ(maskAt(QPoint(120, 120)), 255);
+}
+
+TEST_F(CanvasTest, LassoShowsItsOutlineUntilAnotherToolCancelsIt) {
+  QImage before(kSize, QImage::Format_ARGB32_Premultiplied);
+  canvas().render(&before);
+  canvas().setTool(Canvas::Tool::Lasso);
+  lasso(canvas(), kBox, Qt::NoModifier, false);
+  QImage drawing(kSize, QImage::Format_ARGB32_Premultiplied);
+  canvas().render(&drawing);
+  EXPECT_TRUE(drawing.save(QStringLiteral(PINSEL_SCREENSHOTS "/lasso-outline.png")));
+  EXPECT_GT(largestDifference(before, drawing), 0);
+
+  canvas().setTool(Canvas::Tool::Mask);
+  QImage after(kSize, QImage::Format_ARGB32_Premultiplied);
+  canvas().render(&after);
+  EXPECT_EQ(largestDifference(before, after), 0);
+  EXPECT_FALSE(canvas().tiles().hasMask());
 }
 
 TEST_F(CanvasTest, EraseMaskEmptiesTheMaskAndUndoBringsItBack) {
