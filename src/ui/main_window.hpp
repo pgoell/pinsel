@@ -78,8 +78,11 @@ class MainWindow : public QMainWindow {
   LayersPanel* layers_ = nullptr;
   EngineStatus* engine_status_ = nullptr;
   std::unique_ptr<Engine> engine_;
-  // What each open job calls when it ends.
-  std::map<int, std::function<void(const std::optional<EngineFailure>&)>> engine_jobs_;
+  struct EngineJob {
+    QString model;
+    std::function<void(const std::optional<EngineFailure>&)> ended;
+  };
+  std::map<int, EngineJob> engine_jobs_;
   BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;

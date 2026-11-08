@@ -24,15 +24,16 @@ class DiffusersEngine:
 
     def run(self, job: Job) -> dict[str, Any]:
         op = job.request["op"]
+        if op not in ("load", "generate"):
+            raise ValueError(f"unknown op {op!r}")
         try:
-            if op == "load":
-                return self._load(job)
-            if op == "generate":
-                return self._generate(job)
+            return self._load(job) if op == "load" else self._generate(job)
         except torch.cuda.OutOfMemoryError as error:
-            self._free()
-            raise OutOfMemory(str(error).splitlines()[0]) from None
-        raise ValueError(f"unknown op {op!r}")
+            message = str(error).splitlines()[0]
+        # Out of the except block: its traceback holds the frames, and with them
+        # the tensors, that the job had in use.
+        self._free()
+        raise OutOfMemory(message)
 
     def unload(self) -> None:
         self.pipe = None
@@ -47,8 +48,9 @@ class DiffusersEngine:
         # An 8 GB card holds one SDXL model, so the old one goes first.
         self.unload()
         model = job.request["model"]
-        # A .ckpt is a pickle, which can run code as it loads.
-        if Path(model).suffix.lower() != ".safetensors":
+        # A .ckpt is a pickle, which can run code as it loads. diffusers picks
+        # the safetensors reader by this exact, case-sensitive suffix.
+        if Path(model).suffix != ".safetensors":
             raise ValueError("pinsel loads only .safetensors checkpoints")
         job.progress("load", 0, 2)
         pipe = StableDiffusionXLPipeline.from_single_file(

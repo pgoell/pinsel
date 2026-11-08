@@ -4,7 +4,7 @@ Runs SDXL checkpoints with [diffusers](https://huggingface.co/docs/diffusers) fo
 
 pinsel starts it with `uv run --project sidecar --locked --no-dev --extra diffusers pinsel-sidecar`. The first start downloads torch and diffusers, which takes minutes. pinsel finds `sidecar/` by the source path it was built from; a build moved elsewhere needs `PINSEL_ENGINE`. To run another engine, set `PINSEL_ENGINE` to its command line.
 
-Loads never reach the network. `pinsel_sidecar/sdxl_config/` holds the component configs and CLIP tokenizers of [SDXL base 1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0), with no weights, which `from_single_file` would otherwise fetch from the Hugging Face Hub, and the sidecar sets `HF_HUB_OFFLINE`. Only `.safetensors` checkpoints load: a `.ckpt` is a pickle, which can run code.
+Loads never reach the network. `pinsel_sidecar/sdxl_config/` holds the component configs and CLIP tokenizers of [SDXL base 1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0), with no weights, which `from_single_file` would otherwise fetch from the Hugging Face Hub, and the sidecar sets `HF_HUB_OFFLINE`. Those files are Stability AI's, under the [CreativeML Open RAIL++-M license](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/blob/main/LICENSE.md); the tokenizers' `vocab.json` and `merges.txt` are OpenAI's [CLIP](https://github.com/openai/CLIP), under the MIT license. Only `.safetensors` checkpoints load: a `.ckpt` is a pickle, which can run code.
 
 The tests need no torch: `uv run --project sidecar pytest`.
 

@@ -3,7 +3,6 @@
 #include <QString>
 #include <QWidget>
 #include <functional>
-#include <map>
 #include <optional>
 
 #include "engine/engine.hpp"
@@ -20,9 +19,10 @@ class EngineStatus : public QWidget {
  public:
   explicit EngineStatus(std::function<void()> cancel, QWidget* parent = nullptr);
 
-  void showLoad(int job, const QString& path);
-  void showProgress(int job, const EngineProgress& progress);
-  void showEnd(int job, const std::optional<EngineFailure>& failure);
+  void showLoad(const QString& path);
+  void showProgress(const EngineProgress& progress);
+  // busy says whether another job is still open.
+  void showEnd(const QString& path, const std::optional<EngineFailure>& failure, bool busy);
 
  private:
   void showText(const QString& text);
@@ -30,8 +30,6 @@ class EngineStatus : public QWidget {
   QLabel* label_;
   QProgressBar* bar_;
   QToolButton* cancel_;
-  // The model each open load reads, by its job.
-  std::map<int, QString> loads_;
 };
 
 }  // namespace pinsel

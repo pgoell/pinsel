@@ -101,7 +101,9 @@ MainWindow::MainWindow(QWidget* parent)
           EngineEvents{
               .progress =
                   [this](int job, const EngineProgress& progress) {
-                    engine_status_->showProgress(job, progress);
+                    if (engine_jobs_.contains(job)) {
+                      engine_status_->showProgress(progress);
+                    }
                   },
               .finished = [this](int job, const QString& /*output*/) { endJob(job, std::nullopt); },
               .failed = [this](int job, const EngineFailure& failure) { endJob(job, failure); },
@@ -169,8 +171,8 @@ void MainWindow::addMenus() {
 void MainWindow::loadModel(const QString& path,
                            std::function<void(const std::optional<EngineFailure>&)> ended) {
   const int job = engine_->load(path);
-  engine_jobs_[job] = std::move(ended);
-  engine_status_->showLoad(job, path);
+  engine_jobs_[job] = {.model = path, .ended = std::move(ended)};
+  engine_status_->showLoad(path);
 }
 
 void MainWindow::cancelJobs() {
@@ -180,10 +182,13 @@ void MainWindow::cancelJobs() {
 }
 
 void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure) {
-  engine_status_->showEnd(job, failure);
   auto node = engine_jobs_.extract(job);
-  if (!node.empty() && node.mapped()) {
-    node.mapped()(failure);
+  if (node.empty()) {
+    return;
+  }
+  engine_status_->showEnd(node.mapped().model, failure, !engine_jobs_.empty());
+  if (node.mapped().ended) {
+    node.mapped().ended(failure);
   }
 }
 

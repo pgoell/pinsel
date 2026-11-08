@@ -49,7 +49,8 @@ Engine::~Engine() {
   }
   process_->disconnect();
   // The engine holds nothing worth a wait, and torch can take seconds to exit.
-  // A child that uv started still sees its stdin close, and ends.
+  // A child that uv started outlives the kill on Linux: idle, it ends when its
+  // stdin closes; busy, at its next progress write.
   process_->closeWriteChannel();
   process_->kill();
   process_->waitForFinished(1000);
