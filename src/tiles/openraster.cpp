@@ -256,13 +256,25 @@ Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
 // Groups melt into the layers they hold: a group's opacity multiplies theirs,
 // and a hidden group hides them. That matches the spec for a group that is not
 // isolated; an isolated one would first merge its layers by their own modes.
-// Appends the layers top first, as stack.xml lists them.
+// Appends the layers top first, as stack.xml lists them. Reads from just after
+// the opening tag of the outer stack to just after its closing tag. A loop, not
+// recursion, so no depth of groups can run the thread out of stack.
 void readStack(QXmlStreamReader& xml, const Group& outer, std::vector<StackLayer>& layers) {
-  while (xml.readNextStartElement()) {
+  std::vector<Group> groups{outer};
+  while (!groups.empty() && !xml.atEnd()) {
+    const QXmlStreamReader::TokenType token = xml.readNext();
+    // Only a stack's closing tag gets here, as every other element is skipped.
+    if (token == QXmlStreamReader::EndElement) {
+      groups.pop_back();
+      continue;
+    }
+    if (token != QXmlStreamReader::StartElement) {
+      continue;
+    }
     const QXmlStreamAttributes attributes = xml.attributes();
-    const Group group = groupOf(attributes, outer);
+    const Group group = groupOf(attributes, groups.back());
     if (xml.name() == u"stack") {
-      readStack(xml, group, layers);
+      groups.push_back(group);
       continue;
     }
     if (xml.name() == u"layer") {

@@ -261,6 +261,30 @@ TEST_F(ImageFile, OpenRasterRefusesASizePastThePixelBudget) {
   EXPECT_TRUE(read.tiles.size().isEmpty());
 }
 
+TEST_F(ImageFile, OpenRasterReadsGroupsNestedDeeperThanAThreadStack) {
+  constexpr int kDepth = 200000;
+  QByteArray stack = R"(<image w="1" h="1"><stack>)";
+  stack += QByteArray("<stack>").repeated(kDepth);
+  stack += R"(<layer name="Deep" src="data/layer0.png"/>)";
+  stack += QByteArray("</stack>").repeated(kDepth + 1);
+  stack += "</image>";
+  {
+    QFile file(path(QStringLiteral("deep.ora")));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    pinsel::ZipWriter zip(file);
+    ASSERT_TRUE(zip.add(QStringLiteral("mimetype"), "image/openraster", false));
+    ASSERT_TRUE(zip.add(QStringLiteral("stack.xml"), stack, true));
+    ASSERT_TRUE(
+        zip.add(QStringLiteral("data/layer0.png"), png(filled(QSize(1, 1), Qt::red)), false));
+    ASSERT_TRUE(zip.finish());
+  }
+
+  const pinsel::ReadImage read = pinsel::readImage(path(QStringLiteral("deep.ora")));
+
+  ASSERT_EQ(read.error, QString());
+  EXPECT_EQ(read.tiles.layerName(0), QStringLiteral("Deep"));
+}
+
 TEST_F(ImageFile, APngNamedOraIsNoOpenRasterFile) {
   ASSERT_EQ(pinsel::writeImage(cleanStore(), path(QStringLiteral("flat.png"))), QString());
   ASSERT_TRUE(QFile::rename(path(QStringLiteral("flat.png")), path(QStringLiteral("flat.ora"))));
