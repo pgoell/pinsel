@@ -2,7 +2,7 @@
 # Which round of review this push is, and which commits it covers. Each kind of
 # review (review, security) keeps one comment on the pull request with a marker
 # that records the last commit it covered and the round. Round 1 reads the whole
-# pull request, later rounds only the commits since, and after three rounds the
+# pull request, later rounds only the commits since, and after five rounds the
 # review stops and asks the author to rethink, so an agent author and an agent
 # reviewer cannot cycle all night.
 #
@@ -14,7 +14,7 @@
 # shellcheck disable=SC2153 # ROUND and FROM come from the environment
 set -euo pipefail
 
-MAX_ROUNDS=3
+MAX_ROUNDS=5
 marker="<!-- ci-review:$KIND"
 
 case $1 in
