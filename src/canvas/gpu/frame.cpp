@@ -18,6 +18,12 @@ struct BlendUniforms {
   std::int32_t mode;
 };
 
+// blend.frag compares mode with these numbers; any other mode draws as normal.
+static_assert(static_cast<int>(TileStore::BlendMode::Normal) == 0);
+static_assert(static_cast<int>(TileStore::BlendMode::Multiply) == 1);
+static_assert(static_cast<int>(TileStore::BlendMode::Screen) == 2);
+static_assert(static_cast<int>(TileStore::BlendMode::Overlay) == 3);
+
 quint32 slotStride(const QRhi* rhi) {
   return static_cast<quint32>(rhi->ubufAligned(sizeof(BlendUniforms)));
 }
@@ -156,12 +162,13 @@ void Canvas::Gpu::drawTiles(QRhiCommandBuffer* commands, QRhiGraphicsPipeline* w
 
 void Canvas::Gpu::drawQuad(QRhiCommandBuffer* commands, QRhiGraphicsPipeline* with,
                            QRhiShaderResourceBindings* bindings, QSize pixels,
-                           std::size_t slot) const {
+                           std::optional<std::size_t> slot) const {
   commands->setGraphicsPipeline(with);
   commands->setViewport(
       QRhiViewport(0, 0, static_cast<float>(pixels.width()), static_cast<float>(pixels.height())));
-  const QRhiCommandBuffer::DynamicOffset offset(0, static_cast<quint32>(slot) * slotStride(rhi));
-  commands->setShaderResources(bindings, with == blend_pipeline.get() ? 1 : 0, &offset);
+  const QRhiCommandBuffer::DynamicOffset offset(
+      0, static_cast<quint32>(slot.value_or(0)) * slotStride(rhi));
+  commands->setShaderResources(bindings, slot ? 1 : 0, &offset);
   const QRhiCommandBuffer::VertexInput input(quad.get(), 0);
   commands->setVertexInput(0, 1, &input);
   commands->draw(kQuadVertices);
@@ -215,7 +222,8 @@ void Canvas::Gpu::drawFrame(QRhiCommandBuffer* commands, QRhiRenderTarget* scree
   commands->beginPass(screen, frame.clear, {1.0F, 0}, updates);
   if (vertices) {
     if (result) {
-      drawQuad(commands, present_pipeline.get(), present_bindings.at(*result).get(), pixels, 0);
+      drawQuad(commands, present_pipeline.get(), present_bindings.at(*result).get(), pixels,
+               std::nullopt);
     }
     for (std::size_t position = top ? *top + 1 : 0; position < layers.size(); ++position) {
       if (shows(store, position)) {

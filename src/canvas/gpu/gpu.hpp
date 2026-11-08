@@ -11,6 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <vector>
 
 #include "canvas/canvas.hpp"
@@ -127,8 +128,10 @@ struct Canvas::Gpu {
                         std::size_t top, QRhiResourceUpdateBatch* updates);
   void drawTiles(QRhiCommandBuffer* commands, QRhiGraphicsPipeline* with,
                  const std::vector<Tile>& plane, QSize pixels, QRectF visible) const;
+  // With a slot for a binding set whose uniform buffer takes a dynamic offset.
   void drawQuad(QRhiCommandBuffer* commands, QRhiGraphicsPipeline* with,
-                QRhiShaderResourceBindings* bindings, QSize pixels, std::size_t slot) const;
+                QRhiShaderResourceBindings* bindings, QSize pixels,
+                std::optional<std::size_t> slot) const;
 };
 
 }  // namespace pinsel
