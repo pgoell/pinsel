@@ -206,6 +206,14 @@ pinsel::TileStore maskedStore(QRect masked) {
   return store;
 }
 
+// The input for the store's mask, or an empty one, after a failed check, when
+// there is none.
+pinsel::InpaintInput inputOf(const pinsel::TileStore& store) {
+  const std::optional<pinsel::InpaintInput> input = pinsel::inpaintInput(store);
+  EXPECT_TRUE(input);
+  return input ? *input : pinsel::InpaintInput{};
+}
+
 // Writes the input as the panel does and names the files in a request.
 pinsel::InpaintRequest writeInput(const pinsel::InpaintInput& input, const QTemporaryDir& dir) {
   const QDir folder(dir.path());
@@ -229,10 +237,9 @@ TEST(Engine, InpaintRedrawsOnlyTheMaskAsANewLayer) {
   Harness h;
   const QRect masked(500, 300, 60, 60);
   pinsel::TileStore store = maskedStore(masked);
-  const std::optional<pinsel::InpaintInput> input = pinsel::inpaintInput(store);
-  ASSERT_TRUE(input);
+  const pinsel::InpaintInput input = inputOf(store);
   const QTemporaryDir dir;
-  const pinsel::InpaintRequest sent = writeInput(*input, dir);
+  const pinsel::InpaintRequest sent = writeInput(input, dir);
 
   h.engine.load(kModel);
   const int job = h.engine.inpaint(sent);
@@ -240,9 +247,8 @@ TEST(Engine, InpaintRedrawsOnlyTheMaskAsANewLayer) {
   EXPECT_EQ(ended.output, sent.output) << ended.message();
   EXPECT_EQ(h.counts(job, kGenerate), (std::vector<int>{1, 2}));
 
-  const auto layer = pinsel::inpaintLayer(*input, QImage(ended.output), QStringLiteral("x"));
-  ASSERT_TRUE(layer);
-  EXPECT_TRUE(store.addLayer(*layer));
+  const auto layer = pinsel::inpaintLayer(input, QImage(ended.output), QStringLiteral("x"));
+  ASSERT_TRUE(layer && store.addLayer(*layer));
   const QImage result = store.toImage();
   EXPECT_EQ(result.pixelColor(masked.center()), QColor(Qt::black));
   EXPECT_EQ(result.pixelColor(masked.topLeft() - QPoint(20, 20)), QColor(Qt::white));

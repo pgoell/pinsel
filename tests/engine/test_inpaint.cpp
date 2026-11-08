@@ -30,33 +30,45 @@ void maskRect(TileStore& store, QRect area) {
   store.commit();
 }
 
+// The input for the store's mask, or an empty one, after a failed check, when
+// there is none.
+InpaintInput inputOf(const TileStore& store) {
+  const std::optional<InpaintInput> input = pinsel::inpaintInput(store);
+  EXPECT_TRUE(input);
+  return input ? *input : InpaintInput{};
+}
+
+// The crop for a mask within bounds, or an empty one, after a failed check,
+// when there is none.
+pinsel::InpaintCrop cropOf(QRect bounds, QSize image) {
+  const std::optional<pinsel::InpaintCrop> crop = pinsel::planInpaint(bounds, image);
+  EXPECT_TRUE(crop);
+  return crop ? *crop : pinsel::InpaintCrop{};
+}
+
 TEST(PlanInpaint, PadsTheMaskAndScalesASmallBoxUpToTheModelSize) {
-  const auto crop = pinsel::planInpaint(QRect(400, 400, 100, 100), QSize(2000, 2000));
-  ASSERT_TRUE(crop);
-  EXPECT_EQ(crop->area, QRect(336, 336, 228, 228));
-  EXPECT_EQ(crop->size, QSize(1024, 1024));
+  const pinsel::InpaintCrop crop = cropOf(QRect(400, 400, 100, 100), QSize(2000, 2000));
+  EXPECT_EQ(crop.area, QRect(336, 336, 228, 228));
+  EXPECT_EQ(crop.size, QSize(1024, 1024));
 }
 
 TEST(PlanInpaint, KeepsTheBoxInsideTheImage) {
-  const auto crop = pinsel::planInpaint(QRect(0, 0, 50, 50), QSize(800, 600));
-  ASSERT_TRUE(crop);
-  EXPECT_EQ(crop->area, QRect(0, 0, 114, 114));
+  const pinsel::InpaintCrop crop = cropOf(QRect(0, 0, 50, 50), QSize(800, 600));
+  EXPECT_EQ(crop.area, QRect(0, 0, 114, 114));
 }
 
 TEST(PlanInpaint, KeepsTheShapeInSidesOfWholeSixtyFours) {
-  const auto crop = pinsel::planInpaint(QRect(100, 100, 1800, 600), QSize(4000, 4000));
-  ASSERT_TRUE(crop);
-  EXPECT_EQ(crop->area, QRect(-350, -350, 2700, 1500).intersected(QRect(0, 0, 4000, 4000)));
-  EXPECT_EQ(crop->size.width() % 64, 0);
-  EXPECT_EQ(crop->size.height() % 64, 0);
-  const double ratio = static_cast<double>(crop->area.width()) / crop->area.height();
-  EXPECT_NEAR(static_cast<double>(crop->size.width()) / crop->size.height(), ratio, 0.1);
+  const pinsel::InpaintCrop crop = cropOf(QRect(100, 100, 1800, 600), QSize(4000, 4000));
+  EXPECT_EQ(crop.area, QRect(-350, -350, 2700, 1500).intersected(QRect(0, 0, 4000, 4000)));
+  EXPECT_EQ(crop.size.width() % 64, 0);
+  EXPECT_EQ(crop.size.height() % 64, 0);
+  const double ratio = static_cast<double>(crop.area.width()) / crop.area.height();
+  EXPECT_NEAR(static_cast<double>(crop.size.width()) / crop.size.height(), ratio, 0.1);
 }
 
 TEST(PlanInpaint, KeepsALongThinBoxWithinTheModelsLimits) {
-  const auto crop = pinsel::planInpaint(QRect(0, 0, 8000, 10), QSize(8000, 10));
-  ASSERT_TRUE(crop);
-  EXPECT_EQ(crop->size, QSize(2048, 512));
+  const pinsel::InpaintCrop crop = cropOf(QRect(0, 0, 8000, 10), QSize(8000, 10));
+  EXPECT_EQ(crop.size, QSize(2048, 512));
 }
 
 TEST(PlanInpaint, AnEmptyMaskPlansNothing) {
@@ -72,29 +84,26 @@ TEST(InpaintInput, NeedsAMask) {
 TEST(InpaintInput, CropsAroundTheMaskAcrossTiles) {
   TileStore store = whiteStore(QSize(1200, 800));
   maskRect(store, QRect(480, 300, 80, 40));
-  const std::optional<InpaintInput> input = pinsel::inpaintInput(store);
-  ASSERT_TRUE(input);
-  EXPECT_EQ(input->crop.area, QRect(416, 236, 208, 168));
-  EXPECT_EQ(input->image.size(), input->crop.size);
-  EXPECT_EQ(input->mask.size(), input->crop.size);
-  EXPECT_EQ(input->area_mask.size(), input->crop.area.size());
-  EXPECT_EQ(input->image.pixelColor(0, 0), QColor(Qt::white));
-  const QPoint middle(input->mask.width() / 2, input->mask.height() / 2);
-  EXPECT_EQ(qGray(input->mask.pixel(middle)), 255);
-  EXPECT_EQ(qGray(input->mask.pixel(0, 0)), 0);
+  const InpaintInput input = inputOf(store);
+  EXPECT_EQ(input.crop.area, QRect(416, 236, 208, 168));
+  EXPECT_EQ(input.image.size(), input.crop.size);
+  EXPECT_EQ(input.mask.size(), input.crop.size);
+  EXPECT_EQ(input.area_mask.size(), input.crop.area.size());
+  EXPECT_EQ(input.image.pixelColor(0, 0), QColor(Qt::white));
+  const QPoint middle(input.mask.width() / 2, input.mask.height() / 2);
+  EXPECT_EQ(qGray(input.mask.pixel(middle)), 255);
+  EXPECT_EQ(qGray(input.mask.pixel(0, 0)), 0);
 }
 
 TEST(InpaintLayer, KeepsTheResultOnlyInTheMaskAndOneUndoRemovesIt) {
   TileStore store = whiteStore(QSize(1200, 800));
   maskRect(store, QRect(480, 300, 80, 40));
-  const std::optional<InpaintInput> input = pinsel::inpaintInput(store);
-  ASSERT_TRUE(input);
-  QImage result(input->crop.size, QImage::Format_RGB32);
+  const InpaintInput input = inputOf(store);
+  QImage result(input.crop.size, QImage::Format_RGB32);
   result.fill(Qt::red);
 
-  const auto layer = pinsel::inpaintLayer(*input, result, QStringLiteral("Inpaint"));
-  ASSERT_TRUE(layer);
-  ASSERT_TRUE(store.addLayer(*layer));
+  const auto layer = pinsel::inpaintLayer(input, result, QStringLiteral("Inpaint"));
+  ASSERT_TRUE(layer && store.addLayer(*layer));
   EXPECT_EQ(store.layerCount(), 2U);
   EXPECT_EQ(store.currentLayer(), 1U);
   EXPECT_EQ(store.layerName(1), QStringLiteral("Inpaint"));
@@ -113,9 +122,8 @@ TEST(InpaintLayer, KeepsTheResultOnlyInTheMaskAndOneUndoRemovesIt) {
 TEST(InpaintLayer, ANullResultMakesNoLayer) {
   TileStore store = whiteStore(QSize(600, 600));
   maskRect(store, QRect(10, 10, 20, 20));
-  const std::optional<InpaintInput> input = pinsel::inpaintInput(store);
-  ASSERT_TRUE(input);
-  EXPECT_FALSE(pinsel::inpaintLayer(*input, QImage(), QStringLiteral("Inpaint")));
+  const InpaintInput input = inputOf(store);
+  EXPECT_FALSE(pinsel::inpaintLayer(input, QImage(), QStringLiteral("Inpaint")));
 }
 
 }  // namespace
