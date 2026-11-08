@@ -21,8 +21,10 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QToolBar>
 #include <QtConcurrentRun>
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <tuple>
@@ -68,8 +70,25 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
-bool isPng(const QString& path) {
-  return path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
+struct SaveFormat {
+  QLatin1StringView filter;
+  QLatin1StringView suffix;
+};
+constexpr std::array kSaveFormats{
+    SaveFormat{
+        .filter = QLatin1StringView("PNG image (*.png)"),
+        .suffix = QLatin1StringView("png"),
+    },
+    SaveFormat{
+        .filter = QLatin1StringView("OpenRaster image, with layers and mask (*.ora)"),
+        .suffix = QLatin1StringView("ora"),
+    },
+};
+
+const SaveFormat& saveFormatOf(const QString& filter) {
+  const auto* const found = std::ranges::find_if(
+      kSaveFormats, [&filter](const SaveFormat& format) { return format.filter == filter; });
+  return found == kSaveFormats.end() ? kSaveFormats.front() : *found;
 }
 
 }  // namespace
@@ -224,8 +243,8 @@ void MainWindow::whenChangesAreSafe(const std::function<void()>& proceed) {
 }
 
 void MainWindow::save(const std::function<void(bool saved)>& done) {
-  // Save never writes PNG bytes into a file another format named.
-  if (isPng(path_)) {
+  // Save never writes into a file of a type pinsel cannot write, such as JPEG.
+  if (canWrite(path_)) {
     saveTo(path_, done);
   } else {
     saveAs(done);
@@ -233,26 +252,40 @@ void MainWindow::save(const std::function<void(bool saved)>& done) {
 }
 
 void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
+  // A PNG keeps one layer and no mask, so an image with more starts as
+  // OpenRaster.
+  const TileStore& tiles = canvas_->tiles();
   const QFileInfo current(path_);
-  const QString suggested =
+  const bool layered = tiles.layerCount() > 1 || tiles.hasMask() ||
+                       current.suffix().compare(QStringLiteral("ora"), Qt::CaseInsensitive) == 0;
+  const SaveFormat& format = kSaveFormats.at(layered ? 1 : 0);
+  const QString base =
       path_.isEmpty() ? QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
-                            .filePath(QStringLiteral("Untitled.png"))
-                      : current.dir().filePath(current.completeBaseName() + QStringLiteral(".png"));
-  QFileDialog dialog(this, QStringLiteral("Save Image"), suggested,
-                     QStringLiteral("PNG image (*.png)"));
+                            .filePath(QStringLiteral("Untitled"))
+                      : current.dir().filePath(current.completeBaseName());
+  QStringList filters;
+  for (const SaveFormat& each : kSaveFormats) {
+    filters.append(QString(each.filter));
+  }
+  QFileDialog dialog(this, QStringLiteral("Save Image"), base + u'.' + format.suffix);
+  dialog.setNameFilters(filters);
+  dialog.selectNameFilter(QString(format.filter));
   dialog.setAcceptMode(QFileDialog::AcceptSave);
-  // Adds .png before the dialog's own overwrite check, so the check sees the
-  // file that will be written.
-  dialog.setDefaultSuffix(QStringLiteral("png"));
+  // Adds the suffix before the dialog's own overwrite check, so the check sees
+  // the file that will be written.
+  dialog.setDefaultSuffix(QString(format.suffix));
+  connect(&dialog, &QFileDialog::filterSelected, &dialog, [&dialog](const QString& filter) {
+    dialog.setDefaultSuffix(QString(saveFormatOf(filter).suffix));
+  });
   if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
     done(false);
     return;
   }
   QString path = dialog.selectedFiles().constFirst();
-  if (!isPng(path)) {
-    // A name with another suffix, such as photo.jpg, gets .png on top, which
-    // the dialog never checked.
-    path += QStringLiteral(".png");
+  if (!canWrite(path)) {
+    // A name with another suffix, such as photo.jpg, gets the chosen type's
+    // suffix on top, which the dialog never checked.
+    path += u'.' + saveFormatOf(dialog.selectedNameFilter()).suffix;
     if (QFileInfo::exists(path) &&
         QMessageBox::question(
             this, QStringLiteral("Save Image"),
@@ -276,7 +309,8 @@ void MainWindow::saveTo(const QString& path, const std::function<void(bool saved
       .document = latest_open_,
       .done = done,
   };
-  save_watcher_->setFuture(QtConcurrent::run(writePng, canvas_->tiles().toImage(), path));
+  save_watcher_->setFuture(
+      QtConcurrent::run([tiles = canvas_->tiles(), path] { return writeImage(tiles, path); }));
   updateTitle();
 }
 
@@ -342,6 +376,7 @@ void MainWindow::askAndOpen() {
   for (const QByteArray& format : QImageReader::supportedImageFormats()) {
     patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
   }
+  patterns.append(QStringLiteral("*.ora"));
   const QString path = QFileDialog::getOpenFileName(
       this, QStringLiteral("Open Image"), QString(),
       QStringLiteral("Images (%1)").arg(patterns.join(QLatin1Char(' '))));

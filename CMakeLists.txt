@@ -37,6 +37,7 @@ find_package(Qt6 6.10 REQUIRED COMPONENTS Widgets Svg Concurrent GuiPrivate Shad
 qt_standard_project_setup()
 find_package(benchmark CONFIG REQUIRED)
 find_package(Tracy CONFIG REQUIRED)
+find_package(ZLIB REQUIRED)
 
 # Warnings as errors for this project's targets only, not for GoogleTest.
 set(WARNINGS -Wall -Wextra -Wpedantic -Wconversion -Wshadow -Werror)
@@ -45,9 +46,10 @@ add_library(pinsel-lib src/project.cpp)
 target_include_directories(pinsel-lib PUBLIC src)
 target_compile_options(pinsel-lib PRIVATE ${WARNINGS})
 
-add_library(pinsel-tiles src/tiles/tile_store.cpp src/tiles/image_file.cpp)
+add_library(pinsel-tiles src/tiles/tile_store.cpp src/tiles/image_file.cpp src/tiles/openraster.cpp
+                         src/tiles/zip.cpp)
 target_include_directories(pinsel-tiles PUBLIC src)
-target_link_libraries(pinsel-tiles PUBLIC Qt6::Gui)
+target_link_libraries(pinsel-tiles PUBLIC Qt6::Gui PRIVATE ZLIB::ZLIB)
 target_compile_options(pinsel-tiles PRIVATE ${WARNINGS})
 
 add_library(pinsel-brush src/brush/brush.cpp)
@@ -102,8 +104,8 @@ if(BUILD_TESTING)
   file(MAKE_DIRECTORY ${SHOTS})
 
   add_executable(tests tests/test_brush.cpp tests/test_canvas.cpp tests/test_memory.cpp
-                       tests/test_project.cpp
-                       tests/test_tile_store.cpp tests/test_view.cpp)
+                       tests/test_project.cpp tests/test_view.cpp tests/tiles/test_tile_store.cpp
+                       tests/tiles/test_image_file.cpp)
   target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-brush pinsel-tiles
                                       GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
@@ -135,21 +137,27 @@ if(BUILD_TESTING)
   add_test(NAME screenshot_4k
            COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080
                    --open ${PATTERN})
+  # Layers with each blend mode, a hidden one and a mask, read from OpenRaster.
+  add_test(NAME screenshot_openraster
+           COMMAND pinsel --screenshot ${SHOTS}/openraster-1080p.png --size 1920x1080
+                   --open ${CMAKE_SOURCE_DIR}/tests/data/layers.ora)
   # A new blank image, with no file behind it.
   add_test(NAME screenshot_new
            COMMAND pinsel --screenshot ${SHOTS}/new-image-1080p.png --size 1920x1080
                    --new 1024x1024)
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
-  set_property(TEST screenshot_1080p screenshot_4k screenshot_new screenshot_layers PROPERTY ENVIRONMENT_MODIFICATION
+  set(SCREENSHOT_TESTS screenshot_1080p screenshot_4k screenshot_new screenshot_layers
+                       screenshot_openraster)
+  set_property(TEST ${SCREENSHOT_TESTS} PROPERTY ENVIRONMENT_MODIFICATION
                QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
-  set_property(TEST screenshot_1080p screenshot_new screenshot_layers APPEND PROPERTY ENVIRONMENT_MODIFICATION
-               QT_SCALE_FACTOR=set:1)
+  set_property(TEST screenshot_1080p screenshot_new screenshot_layers screenshot_openraster APPEND
+               PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
   # Windows draws with its native platform to show the real style; offscreen has
   # no fonts there.
   if(NOT WIN32)
-    set_property(TEST screenshot_1080p screenshot_4k screenshot_new screenshot_layers bench_smoke APPEND
+    set_property(TEST ${SCREENSHOT_TESTS} bench_smoke APPEND
                  PROPERTY ENVIRONMENT_MODIFICATION QT_QPA_PLATFORM=set:offscreen)
   endif()
 endif()

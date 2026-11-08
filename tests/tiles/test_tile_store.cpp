@@ -5,7 +5,6 @@
 #include <QPainter>
 #include <QRect>
 #include <QString>
-#include <QTemporaryDir>
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -510,33 +509,4 @@ TEST(TileStore, UndoPastTheBudgetLandsOnTheRevisionOfTheDroppedStep) {
   store.commit();
   store.undo();
   EXPECT_EQ(store.revision(), red);
-}
-
-TEST(ImageFile, APaintedImageComesBackFromAPngUnchanged) {
-  TileStore store = cleanStore();
-  fill(store, QRect(kTile - 20, 30, 40, kTile), Qt::red);
-  fill(store, QRect(0, 0, 5, 5), Qt::transparent);
-  store.commit();
-  const QTemporaryDir dir;
-  ASSERT_TRUE(dir.isValid());
-  const QString path = dir.filePath(QStringLiteral("painted.png"));
-
-  ASSERT_EQ(pinsel::writePng(store.toImage(), path), QString());
-  const pinsel::ReadImage read = pinsel::readImage(path);
-
-  ASSERT_EQ(read.error, QString());
-  EXPECT_EQ(read.tiles.toImage(), store.toImage());
-}
-
-TEST(ImageFile, WritingToAMissingFolderSaysWhy) {
-  const QTemporaryDir dir;
-  ASSERT_TRUE(dir.isValid());
-  const QString path = dir.filePath(QStringLiteral("missing/out.png"));
-  EXPECT_NE(pinsel::writePng(cleanStore().toImage(), path), QString());
-}
-
-TEST(ImageFile, ReadingAMissingFileSaysWhyAndLeavesTheStoreEmpty) {
-  const pinsel::ReadImage read = pinsel::readImage(QStringLiteral("no/such/image.png"));
-  EXPECT_NE(read.error, QString());
-  EXPECT_TRUE(read.tiles.size().isEmpty());
 }
