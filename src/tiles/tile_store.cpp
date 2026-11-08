@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 namespace pinsel {
@@ -10,7 +11,8 @@ namespace pinsel {
 namespace {
 
 std::size_t tilesAcross(int pixels) {
-  return static_cast<std::size_t>((pixels + TileStore::kTileSize - 1) / TileStore::kTileSize);
+  const std::int64_t tile = TileStore::kTileSize;
+  return static_cast<std::size_t>((std::int64_t{pixels} + tile - 1) / tile);
 }
 
 QPainter::CompositionMode compositionMode(TileStore::BlendMode mode) {

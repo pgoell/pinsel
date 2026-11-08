@@ -1,6 +1,7 @@
 #include "tiles/openraster.hpp"
 
 #include <QBuffer>
+#include <QImageReader>
 #include <QImageWriter>
 #include <QPainter>
 #include <QSaveFile>
@@ -8,6 +9,7 @@
 #include <QXmlStreamWriter>
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -290,6 +292,19 @@ struct Stack {
   QString error;
 };
 
+// stack.xml can name any size, so it gets the same pixel budget that Qt's
+// image readers give a PNG's header.
+bool opensAtSize(QSize size) {
+  constexpr std::int64_t kMaxSide = 65535;
+  constexpr std::int64_t kBytesPerPixel = 4;
+  constexpr std::int64_t kMiB = std::int64_t{1024} * 1024;
+  const std::int64_t width = size.width();
+  const std::int64_t height = size.height();
+  const std::int64_t limit = QImageReader::allocationLimit();
+  return width <= kMaxSide && height <= kMaxSide &&
+         (limit <= 0 || width * height * kBytesPerPixel <= limit * kMiB);
+}
+
 Stack readStackXml(const QByteArray& data) {
   QXmlStreamReader xml(data);
   Stack stack;
@@ -307,6 +322,10 @@ Stack readStackXml(const QByteArray& data) {
     stack.error = QStringLiteral("stack.xml is broken: %1").arg(xml.errorString());
   } else if (stack.size.isEmpty()) {
     stack.error = QStringLiteral("stack.xml gives the image no size");
+  } else if (!opensAtSize(stack.size)) {
+    stack.error = QStringLiteral("The image is %1 x %2 pixels, more than pinsel opens")
+                      .arg(stack.size.width())
+                      .arg(stack.size.height());
   }
   std::ranges::reverse(stack.layers);
   return stack;

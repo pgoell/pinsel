@@ -239,6 +239,28 @@ TEST_F(ImageFile, OpenRasterWithABrokenLayerSaysWhich) {
   EXPECT_TRUE(read.tiles.size().isEmpty());
 }
 
+TEST_F(ImageFile, OpenRasterRefusesASizePastThePixelBudget) {
+  {
+    QFile file(path(QStringLiteral("huge.ora")));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    pinsel::ZipWriter zip(file);
+    ASSERT_TRUE(zip.add(QStringLiteral("mimetype"), "image/openraster", false));
+    ASSERT_TRUE(zip.add(QStringLiteral("stack.xml"),
+                        R"(<image w="2147483647" h="2147483647"><stack>
+<layer src="data/layer0.png"/></stack></image>)",
+                        true));
+    ASSERT_TRUE(
+        zip.add(QStringLiteral("data/layer0.png"), png(filled(QSize(1, 1), Qt::red)), false));
+    ASSERT_TRUE(zip.finish());
+  }
+
+  const pinsel::ReadImage read = pinsel::readImage(path(QStringLiteral("huge.ora")));
+
+  EXPECT_EQ(read.error,
+            QStringLiteral("The image is 2147483647 x 2147483647 pixels, more than pinsel opens"));
+  EXPECT_TRUE(read.tiles.size().isEmpty());
+}
+
 TEST_F(ImageFile, APngNamedOraIsNoOpenRasterFile) {
   ASSERT_EQ(pinsel::writeImage(cleanStore(), path(QStringLiteral("flat.png"))), QString());
   ASSERT_TRUE(QFile::rename(path(QStringLiteral("flat.png")), path(QStringLiteral("flat.ora"))));
