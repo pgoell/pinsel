@@ -10,7 +10,6 @@
 #include <psapi.h>
 #include <wrl/client.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <vector>
 #else
@@ -47,9 +46,14 @@ std::optional<double> heapInUse() {
 #elif defined(_WIN32)
   // The C runtime allocates from the process heap; Qt and the drivers may add
   // heaps of their own.
-  std::vector<HANDLE> heaps(GetProcessHeaps(0, nullptr));
-  heaps.resize(std::min<std::size_t>(
-      heaps.size(), GetProcessHeaps(static_cast<DWORD>(heaps.size()), heaps.data())));
+  // Another thread may add a heap between the calls; then the call fills nothing.
+  std::vector<HANDLE> heaps;
+  DWORD count = GetProcessHeaps(0, nullptr);
+  while (count > heaps.size()) {
+    heaps.resize(count);
+    count = GetProcessHeaps(static_cast<DWORD>(heaps.size()), heaps.data());
+  }
+  heaps.resize(count);
   std::size_t bytes = 0;
   for (HANDLE heap : heaps) {
     if (HeapLock(heap) == 0) {

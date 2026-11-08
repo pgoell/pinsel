@@ -173,8 +173,8 @@ int main(int argc, char** argv) {
   const QCommandLineOption memory(
       QStringLiteral("memory-report"),
       QStringLiteral("When the image is ready, wait for the GPU to settle, then save what the "
-                     "process, the image and the engine hold as JSON. Quits unless --screenshot "
-                     "follows."),
+                     "process, the image and the engine hold as JSON. Then saves the --screenshot "
+                     "if given, and quits."),
       QStringLiteral("path"));
   parser.addOption(screenshot);
   parser.addOption(memory);

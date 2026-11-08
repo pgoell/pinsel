@@ -12,6 +12,8 @@ struct MemoryUse {
   // the graphics kernel charges to this process without mapping it here.
   // Elsewhere the anonymous resident set.
   double private_mb = 0.0;
+  // On Windows the peak commit charge; elsewhere the peak of the whole
+  // resident set, files included.
   double peak_private_mb = 0.0;
   // Private committed pages in this process's address space. Below private_mb
   // by what the graphics kernel charges (Windows only).
