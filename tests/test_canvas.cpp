@@ -4,11 +4,15 @@
 #include <QColor>
 #include <QImage>
 #include <QLineF>
+#include <QLinearGradient>
 #include <QMouseEvent>
+#include <QPainter>
 #include <QPoint>
 #include <QPointF>
 #include <QString>
+#include <algorithm>
 #include <array>
+#include <cstdlib>
 #include <memory>
 #include <tuple>
 
@@ -45,6 +49,24 @@ void drag(QWidget& widget, QLineF path, Qt::KeyboardModifiers modifiers = Qt::No
 }
 
 constexpr QLineF kAcross(50, 150, 350, 150);
+
+// Of any color channel, over every pixel of two images of one size.
+int largestDifference(const QImage& one, const QImage& other) {
+  int largest = 0;
+  for (int y = 0; y < one.height(); ++y) {
+    for (int x = 0; x < one.width(); ++x) {
+      const QRgb a = one.pixel(x, y);
+      const QRgb b = other.pixel(x, y);
+      largest = std::max({
+          largest,
+          std::abs(qRed(a) - qRed(b)),
+          std::abs(qGreen(a) - qGreen(b)),
+          std::abs(qBlue(a) - qBlue(b)),
+      });
+    }
+  }
+  return largest;
+}
 
 class CanvasTest : public testing::Test {
  protected:
@@ -144,6 +166,51 @@ TEST_F(CanvasTest, BrushPaintsOnTheCurrentLayer) {
   EXPECT_EQ(tiles.layerTile(1, 0).pixelColor(200, 150), QColor(Qt::black));
   EXPECT_EQ(tiles.layerTile(0, 0).pixelColor(200, 150), QColor(Qt::white));
   EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::black));
+}
+
+// The export flattens with QPainter and the canvas with the GPU; both must
+// give the same picture. Bands of each mode, at several opacities, over and
+// under plain layers, with soft alpha. A machine with no GPU skips it.
+TEST_F(CanvasTest, TheGpuBlendsLayersAsTheExportDoes) {
+  using Mode = TileStore::BlendMode;
+  const auto band = [&](int index, Mode mode, double opacity) {
+    canvas().edit([&](TileStore& tiles) {
+      tiles.addLayer();
+      const QRect area(20 + (index * 60), 10, 120, 280);
+      tiles.paint(area, [&](QPainter& painter, std::size_t /*tile*/) {
+        QLinearGradient gradient(area.topLeft(), area.bottomLeft());
+        gradient.setColorAt(0, QColor(250, 40, 90, 255));
+        gradient.setColorAt(1, QColor(30, 200, 240, 60));
+        painter.fillRect(area, gradient);
+      });
+      tiles.commit();
+      tiles.setLayerBlendMode(tiles.currentLayer(), mode);
+      tiles.setLayerOpacity(tiles.currentLayer(), opacity);
+    });
+  };
+  canvas().edit([](TileStore& tiles) {
+    tiles.paint(QRect(0, 0, 200, 300), [](QPainter& painter, std::size_t /*tile*/) {
+      painter.fillRect(QRect(0, 0, 200, 300), QColor(60, 90, 120));
+    });
+  });
+  band(0, Mode::Multiply, 0.8);
+  band(1, Mode::Normal, 1.0);
+  band(2, Mode::Overlay, 1.0);
+  band(3, Mode::Screen, 0.6);
+  band(4, Mode::Normal, 0.5);
+  band(5, Mode::Normal, 1.0);
+
+  const QImage frame = canvas().grabFramebuffer().convertToFormat(QImage::Format_ARGB32);
+  if (frame.isNull()) {
+    GTEST_SKIP() << "No GPU";
+  }
+  QImage expected(kSize, QImage::Format_ARGB32_Premultiplied);
+  expected.fill(canvas().palette().base().color());
+  QPainter(&expected).drawImage(0, 0, canvas().tiles().toImage());
+  expected.convertTo(QImage::Format_ARGB32);
+  ASSERT_EQ(frame.size(), expected.size());
+  EXPECT_LE(largestDifference(frame, expected), 3);
+  EXPECT_TRUE(frame.save(QStringLiteral(PINSEL_SCREENSHOTS "/blend-modes.png")));
 }
 
 }  // namespace

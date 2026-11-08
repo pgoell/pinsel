@@ -54,11 +54,14 @@ add_library(pinsel-brush src/brush/brush.cpp)
 target_link_libraries(pinsel-brush PUBLIC pinsel-tiles)
 target_compile_options(pinsel-brush PRIVATE ${WARNINGS})
 
-add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp)
+add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp src/canvas/gpu/textures.cpp
+                          src/canvas/gpu/frame.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
 target_link_libraries(pinsel-canvas PUBLIC Qt6::Widgets pinsel-brush PRIVATE Qt6::GuiPrivate)
-qt_add_shaders(pinsel-canvas shaders PREFIX /shaders BASE src/canvas
-               FILES src/canvas/canvas.vert src/canvas/canvas.frag)
+qt_add_shaders(pinsel-canvas shaders PREFIX /shaders BASE src/canvas/shaders
+               FILES src/canvas/shaders/tile.vert src/canvas/shaders/tile.frag
+                     src/canvas/shaders/quad.vert src/canvas/shaders/blend.frag
+                     src/canvas/shaders/present.frag)
 # The Tracy client defines TRACY_ENABLE for everything that links it. Without it,
 # Tracy's header turns every macro into nothing, so code can mark zones in every build.
 if(PINSEL_TRACY)

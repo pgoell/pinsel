@@ -39,6 +39,10 @@ class TileStore {
 
   // Image is the current layer.
   enum class Plane : std::uint8_t { Image, Mask };
+  // How a layer mixes with the layers below it: the separable modes of the W3C
+  // Compositing and Blending spec, as QPainter's composition modes of the same
+  // names compute them. https://www.w3.org/TR/compositing-1/#blending
+  enum class BlendMode : std::uint8_t { Normal, Multiply, Screen, Overlay };
 
   TileStore() = default;
   // One layer, converted to kFormat. Every tile starts dirty. The store stays
@@ -76,6 +80,17 @@ class TileStore {
   [[nodiscard]] bool layerVisible(std::size_t layer) const {
     return layers_.at(layer).visible;
   }
+  // From 0, which hides the layer, to 1.
+  [[nodiscard]] double layerOpacity(std::size_t layer) const {
+    return layers_.at(layer).opacity;
+  }
+  [[nodiscard]] BlendMode layerBlendMode(std::size_t layer) const {
+    return layers_.at(layer).blend;
+  }
+  // Normal at full opacity: the layer simply covers the ones below it.
+  [[nodiscard]] bool layerPlain(std::size_t layer) const {
+    return layers_.at(layer).blend == BlendMode::Normal && layers_.at(layer).opacity >= 1.0;
+  }
   [[nodiscard]] const QImage& layerTile(std::size_t layer, std::size_t index) const {
     return layers_.at(layer).tiles.at(index);
   }
@@ -91,6 +106,11 @@ class TileStore {
   // Moves the layer at from to position to and makes it current.
   void moveLayer(std::size_t from, std::size_t to);
   void setLayerVisible(std::size_t layer, bool visible);
+  // Clamps opacity to between 0 and 1. With join, the change joins the newest
+  // step when that step only changed this layer's opacity, so dragging a slider
+  // makes one step.
+  void setLayerOpacity(std::size_t layer, double opacity, bool join = false);
+  void setLayerBlendMode(std::size_t layer, BlendMode mode);
 
   // Calls draw once for each tile under area, with the tile's index and a
   // painter in image pixels that is clipped to area and to the tile. A null
@@ -130,6 +150,8 @@ class TileStore {
     std::uint64_t id = kMaskId;
     QString name;
     bool visible = true;
+    double opacity = 1.0;
+    BlendMode blend = BlendMode::Normal;
     std::vector<QImage> tiles;
     std::vector<bool> dirty;
     // Which tiles the open step already saved.
@@ -152,6 +174,8 @@ class TileStore {
     // that the stack after the change has lost.
     std::optional<Stack> stack;
     std::size_t stack_bytes = 0;
+    // The layer whose opacity is all the step changed, or kMaskId.
+    std::uint64_t opacity_of = kMaskId;
   };
 
   [[nodiscard]] Layer emptyLayer() const;

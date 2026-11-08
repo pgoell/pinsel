@@ -13,6 +13,20 @@ std::size_t tilesAcross(int pixels) {
   return static_cast<std::size_t>((pixels + TileStore::kTileSize - 1) / TileStore::kTileSize);
 }
 
+QPainter::CompositionMode compositionMode(TileStore::BlendMode mode) {
+  switch (mode) {
+    case TileStore::BlendMode::Multiply:
+      return QPainter::CompositionMode_Multiply;
+    case TileStore::BlendMode::Screen:
+      return QPainter::CompositionMode_Screen;
+    case TileStore::BlendMode::Overlay:
+      return QPainter::CompositionMode_Overlay;
+    case TileStore::BlendMode::Normal:
+      break;
+  }
+  return QPainter::CompositionMode_SourceOver;
+}
+
 }  // namespace
 
 TileStore::TileStore(const QImage& image) {
@@ -81,6 +95,8 @@ QImage TileStore::toImage(Plane plane) const {
   image.fill(Qt::transparent);
   QPainter painter(&image);
   const auto draw = [&](const Layer& layer) {
+    painter.setOpacity(layer.opacity);
+    painter.setCompositionMode(compositionMode(layer.blend));
     for (std::size_t index = 0; index < layer.tiles.size(); ++index) {
       if (!layer.tiles.at(index).isNull()) {
         painter.drawImage(tileRect(index).topLeft(), layer.tiles.at(index));
@@ -162,6 +178,29 @@ void TileStore::setLayerVisible(std::size_t layer, bool visible) {
     return;
   }
   restack([this, layer, visible] { layers_.at(layer).visible = visible; });
+}
+
+void TileStore::setLayerOpacity(std::size_t layer, double opacity, bool join) {
+  opacity = std::clamp(opacity, 0.0, 1.0);
+  if (layer >= layers_.size() || layers_.at(layer).opacity == opacity) {
+    return;
+  }
+  const std::uint64_t id = layers_.at(layer).id;
+  if (join && open_.tiles.empty() && redo_.empty() && !undo_.empty() &&
+      undo_.back().opacity_of == id) {
+    layers_.at(layer).opacity = opacity;
+    undo_.back().revision = ++last_revision_;
+    return;
+  }
+  restack([this, layer, opacity] { layers_.at(layer).opacity = opacity; });
+  undo_.back().opacity_of = id;
+}
+
+void TileStore::setLayerBlendMode(std::size_t layer, BlendMode mode) {
+  if (layer >= layers_.size() || layers_.at(layer).blend == mode) {
+    return;
+  }
+  restack([this, layer, mode] { layers_.at(layer).blend = mode; });
 }
 
 void TileStore::save(Layer& layer, std::size_t index) {
