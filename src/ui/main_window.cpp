@@ -178,7 +178,6 @@ void MainWindow::addMenus() {
 void MainWindow::loadModel(const QString& path,
                            std::function<void(const std::optional<EngineFailure>&)> ended) {
   const int job = engine_->load(path);
-  model_ = path;
   engine_jobs_[job] = {
       .kind = EngineStatus::Job::Load,
       .model = path,
@@ -198,20 +197,21 @@ void MainWindow::inpaint(const QString& prompt, const std::function<void(bool ad
 }
 
 bool MainWindow::runInpaint(const InpaintRequest& request, PromptPanel::Ended ended) {
-  if (model_.isEmpty()) {
+  const QString model = engine_->model();
+  if (model.isEmpty()) {
     return false;
   }
   const int job = engine_->inpaint(request);
   engine_jobs_[job] = {
       .kind = EngineStatus::Job::Inpaint,
-      .model = model_,
+      .model = model,
       .ended =
           [this, document = latest_open_, ended = std::move(ended)](
               const std::optional<EngineFailure>& failure, const QString& output) {
             ended(failure, document == latest_open_ ? output : QString());
           },
   };
-  engine_status_->showStart(EngineStatus::Job::Inpaint, model_);
+  engine_status_->showStart(EngineStatus::Job::Inpaint, model);
   return true;
 }
 
@@ -228,9 +228,6 @@ void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure,
     return;
   }
   const EngineJob& ended = node.mapped();
-  if (ended.kind == EngineStatus::Job::Load && failure && ended.model == model_) {
-    model_.clear();
-  }
   engine_status_->showEnd(ended.kind, ended.model, failure, !engine_jobs_.empty());
   ended.ended(failure, output);
 }

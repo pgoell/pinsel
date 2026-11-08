@@ -90,8 +90,6 @@ class MainWindow : public QMainWindow {
     PromptPanel::Ended ended;
   };
   std::map<int, EngineJob> engine_jobs_;
-  // The model the engine holds once its queued loads end.
-  QString model_;
   BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;

@@ -131,6 +131,7 @@ TEST(Engine, ReportsLoadProgressThenFinishes) {
   const int job = h.engine.load(kModel);
   EXPECT_EQ(h.waitFor(job).kind(), std::nullopt);
   EXPECT_EQ(h.counts(job, kLoad), (std::vector<int>{1, 2}));
+  EXPECT_EQ(h.engine.model(), kModel);
 }
 
 TEST(Engine, ReportsEachStepAndTheOutput) {
@@ -183,6 +184,7 @@ TEST(Engine, ACrashFailsTheJobAndTheNextJobLoadsTheModelAgain) {
 TEST(Engine, AModelThatCrashesTheEngineIsNotLoadedAgain) {
   Harness h;
   EXPECT_EQ(h.waitFor(h.engine.load(QStringLiteral("crash"))).kind(), Kind::Stopped);
+  EXPECT_TRUE(h.engine.model().isEmpty());
   EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox")))).message(),
             "RuntimeError: No model loaded");
 }
@@ -191,6 +193,7 @@ TEST(Engine, AFailedLoadLeavesNoModel) {
   Harness h;
   h.engine.load(kModel);
   EXPECT_EQ(h.waitFor(h.engine.load(QStringLiteral("missing"))).kind(), Kind::Failed);
+  EXPECT_TRUE(h.engine.model().isEmpty());
   EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox")))).message(),
             "RuntimeError: No model loaded");
 }

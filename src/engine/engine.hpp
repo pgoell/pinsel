@@ -91,6 +91,11 @@ class Engine {
   int inpaint(const InpaintRequest& request);
   // Does nothing for a job that has ended.
   void cancel(int job);
+  // The model the queued jobs will run on, or empty when a load failed or none
+  // was asked for.
+  [[nodiscard]] const QString& model() const {
+    return model_;
+  }
   [[nodiscard]] bool busy() const {
     return !open_.empty();
   }
