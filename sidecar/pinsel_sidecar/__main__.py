@@ -1,4 +1,5 @@
 import io
+import os
 import sys
 
 from .protocol import serve
@@ -10,6 +11,8 @@ def main() -> None:
     events = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", newline="\n", line_buffering=True)
     requests = io.TextIOWrapper(sys.stdin.buffer, encoding="utf-8")
     sys.stdout = sys.stderr
+    # Loads read only local files; this stops any library from reaching the Hub.
+    os.environ["HF_HUB_OFFLINE"] = "1"
     from .diffusers_engine import DiffusersEngine
 
     serve(DiffusersEngine(), requests, events)

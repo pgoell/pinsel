@@ -39,6 +39,10 @@ class Engine(Protocol):
         """Runs job.request and returns the fields of its done event."""
         ...
 
+    def unload(self) -> None:
+        """Lets go of the model and frees its memory."""
+        ...
+
 
 def serve(engine: Engine, stdin: TextIO, stdout: TextIO) -> None:
     """Runs jobs one at a time, in order, until stdin closes.
@@ -82,15 +86,20 @@ def serve(engine: Engine, stdin: TextIO, stdout: TextIO) -> None:
         try:
             if job.cancelled.is_set():
                 raise Cancelled
+            # A cancel that comes after the last progress report is too late:
+            # the job is done.
             result = engine.run(job)
-            if job.cancelled.is_set():
-                raise Cancelled
             send({"event": "done", "job": job.id, **result})
+            continue
         except Cancelled:
-            send({"event": "error", "job": job.id, "kind": "cancelled", "message": "Cancelled"})
+            error_event = {"kind": "cancelled", "message": "Cancelled"}
         except OutOfMemory as error:
-            send({"event": "error", "job": job.id, "kind": "oom", "message": str(error) or "Out of GPU memory"})
+            error_event = {"kind": "oom", "message": str(error) or "Out of GPU memory"}
         except Exception as error:  # noqa: BLE001 - any failure ends only this job
-            send({"event": "error", "job": job.id, "kind": "failed", "message": f"{type(error).__name__}: {error}"})
+            error_event = {"kind": "failed", "message": f"{type(error).__name__}: {error}"}
         finally:
             open_jobs.pop(job.id, None)
+        # pinsel takes a load that did not finish to leave no model.
+        if job.request["op"] == "load":
+            engine.unload()
+        send({"event": "error", "job": job.id, **error_event})

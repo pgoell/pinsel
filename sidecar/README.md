@@ -2,7 +2,9 @@
 
 Runs SDXL checkpoints with [diffusers](https://huggingface.co/docs/diffusers) for pinsel, in a process of its own: a crash or a lack of GPU memory here ends a job, not the editor. Milestone 5 replaces it with pinsel's own pipeline, behind the same protocol.
 
-pinsel starts it with `uv run --project sidecar --locked --no-dev --extra diffusers pinsel-sidecar`. The first start downloads torch and diffusers, which takes minutes. To run another engine, set `PINSEL_ENGINE` to its command line.
+pinsel starts it with `uv run --project sidecar --locked --no-dev --extra diffusers pinsel-sidecar`. The first start downloads torch and diffusers, which takes minutes. pinsel finds `sidecar/` by the source path it was built from; a build moved elsewhere needs `PINSEL_ENGINE`. To run another engine, set `PINSEL_ENGINE` to its command line.
+
+Loads never reach the network. `pinsel_sidecar/sdxl_config/` holds the component configs and CLIP tokenizers of [SDXL base 1.0](https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0), with no weights, which `from_single_file` would otherwise fetch from the Hugging Face Hub, and the sidecar sets `HF_HUB_OFFLINE`. Only `.safetensors` checkpoints load: a `.ckpt` is a pickle, which can run code.
 
 The tests need no torch: `uv run --project sidecar pytest`.
 
@@ -14,7 +16,7 @@ Every request carries a `job` id that pinsel picks. The engine runs jobs one at 
 
 | Request | Fields |
 | --- | --- |
-| `load` | `model`: path to an SDXL checkpoint (`.safetensors`). Lets go of the model held before. |
+| `load` | `model`: path to an SDXL checkpoint, which must be `.safetensors`. Lets go of the model held before. |
 | `generate` | `prompt`, `negative_prompt`, `steps`, `seed`, `width`, `height`, `output`: path for the PNG. Needs a loaded model. |
 | `cancel` | Ends the job named by `job` at its next progress report, or before it starts. |
 
@@ -25,7 +27,7 @@ Every request carries a `job` id that pinsel picks. The engine runs jobs one at 
 | `done` | `job`, and `output` for `generate`. |
 | `error` | `job` (null for a line it could not read), `kind` (`cancelled`, `oom` or `failed`), `message`. |
 
-After `oom` the engine has freed what it could and keeps running. After a failed or cancelled `load` it holds no model. If the process ends, pinsel fails every open job and starts it again for the next one, loading the last model first.
+After `oom` the engine has freed what it could and keeps running. After a `load` ends in any error it holds no model. A cancel that arrives after a job's last progress report changes nothing: the job ends `done`. If the process ends, pinsel fails every open job and starts it again for the next one, loading the last model first.
 
 ```
 → {"op": "load", "job": 1, "model": "D:/models/ponyDiffusionV6XL.safetensors"}

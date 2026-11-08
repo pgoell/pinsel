@@ -95,7 +95,17 @@ ImageFormat firstFormat(bool layered) {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       canvas_(new Canvas(this)),
-      engine_status_(new EngineStatus(this)),
+      engine_status_(new EngineStatus([this] { cancelJobs(); }, this)),
+      engine_(std::make_unique<Engine>(
+          Engine::defaultCommand(),
+          EngineEvents{
+              .progress =
+                  [this](int job, const EngineProgress& progress) {
+                    engine_status_->showProgress(job, progress);
+                  },
+              .finished = [this](int job, const QString& /*output*/) { endJob(job, std::nullopt); },
+              .failed = [this](int job, const EngineFailure& failure) { endJob(job, failure); },
+          })),
       save_watcher_(new QFutureWatcher<QString>(this)) {
   connect(save_watcher_, &QFutureWatcher<QString>::finished, this, &MainWindow::finishSave);
   resize(1280, 800);
@@ -153,18 +163,34 @@ void MainWindow::addMenus() {
 
   QMenu* diffusion = menuBar()->addMenu(QStringLiteral("&Diffusion"));
   diffusion->addAction(QStringLiteral("&Load Model..."), this, &MainWindow::chooseModel);
-  diffusion->addAction(QStringLiteral("&Cancel"), engine_status_, &EngineStatus::cancel);
+  diffusion->addAction(QStringLiteral("&Cancel"), this, &MainWindow::cancelJobs);
 }
 
 void MainWindow::loadModel(const QString& path,
                            std::function<void(const std::optional<EngineFailure>&)> ended) {
-  engine_status_->loadModel(path, std::move(ended));
+  const int job = engine_->load(path);
+  engine_jobs_[job] = std::move(ended);
+  engine_status_->showLoad(job, path);
+}
+
+void MainWindow::cancelJobs() {
+  for (const auto& [job, ended] : engine_jobs_) {
+    engine_->cancel(job);
+  }
+}
+
+void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure) {
+  engine_status_->showEnd(job, failure);
+  auto node = engine_jobs_.extract(job);
+  if (!node.empty() && node.mapped()) {
+    node.mapped()(failure);
+  }
 }
 
 void MainWindow::chooseModel() {
   const QString path =
       QFileDialog::getOpenFileName(this, QStringLiteral("Load Model"), QString(),
-                                   QStringLiteral("SDXL checkpoints (*.safetensors *.ckpt)"));
+                                   QStringLiteral("SDXL checkpoints (*.safetensors)"));
   if (!path.isEmpty()) {
     loadModel(path, {});
   }

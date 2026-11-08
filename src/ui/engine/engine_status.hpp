@@ -4,7 +4,6 @@
 #include <QWidget>
 #include <functional>
 #include <map>
-#include <memory>
 #include <optional>
 
 #include "engine/engine.hpp"
@@ -15,32 +14,24 @@ class QToolButton;
 
 namespace pinsel {
 
-// Owns the engine and shows, for the status bar, what it is doing: the model it
-// holds, a job's progress with a button that cancels it, or why a job failed.
+// Shows, for the status bar, what the engine is doing: the model it holds, a
+// load's progress with a button that calls cancel, or why a load failed.
 class EngineStatus : public QWidget {
  public:
-  explicit EngineStatus(QWidget* parent = nullptr);
+  explicit EngineStatus(std::function<void()> cancel, QWidget* parent = nullptr);
 
-  // Calls ended with the failure, or with none once the model is loaded.
-  void loadModel(const QString& path,
-                 std::function<void(const std::optional<EngineFailure>&)> ended = {});
-  // Cancels every job that has not ended.
-  void cancel();
+  void showLoad(int job, const QString& path);
+  void showProgress(int job, const EngineProgress& progress);
+  void showEnd(int job, const std::optional<EngineFailure>& failure);
 
  private:
   void showText(const QString& text);
-  void end(int job, const std::optional<EngineFailure>& failure);
 
   QLabel* label_;
   QProgressBar* bar_;
   QToolButton* cancel_;
-  std::unique_ptr<Engine> engine_;
-  // Loads that have not ended.
-  struct Pending {
-    QString model;
-    std::function<void(const std::optional<EngineFailure>&)> ended;
-  };
-  std::map<int, Pending> pending_;
+  // The model each open load reads, by its job.
+  std::map<int, QString> loads_;
 };
 
 }  // namespace pinsel

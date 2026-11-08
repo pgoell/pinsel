@@ -1,12 +1,17 @@
 """Runs SDXL checkpoints with Hugging Face diffusers."""
 
 import gc
+from pathlib import Path
 from typing import Any
 
 import torch
 from diffusers import StableDiffusionXLPipeline
 
 from .protocol import Job, OutOfMemory
+
+# SDXL base 1.0's component configs and tokenizers, without weights. With them
+# a load needs no Hugging Face Hub, which from_single_file would ask otherwise.
+CONFIG = Path(__file__).parent / "sdxl_config"
 
 
 class DiffusersEngine:
@@ -29,6 +34,10 @@ class DiffusersEngine:
             raise OutOfMemory(str(error).splitlines()[0]) from None
         raise ValueError(f"unknown op {op!r}")
 
+    def unload(self) -> None:
+        self.pipe = None
+        self._free()
+
     def _free(self) -> None:
         gc.collect()
         if self.device == "cuda":
@@ -36,10 +45,15 @@ class DiffusersEngine:
 
     def _load(self, job: Job) -> dict[str, Any]:
         # An 8 GB card holds one SDXL model, so the old one goes first.
-        self.pipe = None
-        self._free()
+        self.unload()
+        model = job.request["model"]
+        # A .ckpt is a pickle, which can run code as it loads.
+        if Path(model).suffix.lower() != ".safetensors":
+            raise ValueError("pinsel loads only .safetensors checkpoints")
         job.progress("load", 0, 2)
-        pipe = StableDiffusionXLPipeline.from_single_file(job.request["model"], torch_dtype=self.dtype)
+        pipe = StableDiffusionXLPipeline.from_single_file(
+            model, config=str(CONFIG), local_files_only=True, torch_dtype=self.dtype
+        )
         job.progress("load", 1, 2)
         pipe.to(self.device)
         job.progress("load", 2, 2)

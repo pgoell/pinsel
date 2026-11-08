@@ -48,13 +48,11 @@ Engine::~Engine() {
     return;
   }
   process_->disconnect();
-  // An idle sidecar ends when its stdin closes. A busy one would finish its job
-  // first, which nobody waits for.
+  // The engine holds nothing worth a wait, and torch can take seconds to exit.
+  // A child that uv started still sees its stdin close, and ends.
   process_->closeWriteChannel();
-  if (busy() || !process_->waitForFinished(2000)) {
-    process_->kill();
-    process_->waitForFinished(2000);
-  }
+  process_->kill();
+  process_->waitForFinished(1000);
 }
 
 QStringList Engine::defaultCommand() {
