@@ -209,6 +209,9 @@ if(BUILD_TESTING)
                screenshot_inpaint APPEND
                PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
+  # A WIN32 program sends Qt's messages to the debugger, not stderr, unless told.
+  set_property(TEST inpaint_without_mask inpaint_without_model APPEND
+               PROPERTY ENVIRONMENT_MODIFICATION QT_FORCE_STDERR_LOGGING=set:1)
   set_property(TEST screenshot_engine_loaded screenshot_engine_stopped screenshot_inpaint
                inpaint_without_mask inpaint_without_model APPEND PROPERTY ENVIRONMENT_MODIFICATION
                PINSEL_ENGINE=set:$<TARGET_FILE:fake-engine>)
