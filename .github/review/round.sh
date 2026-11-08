@@ -2,11 +2,9 @@
 # Which round of review this push is, and which commits it covers. Each kind of
 # review (review, security) keeps one comment on the pull request with a marker
 # that records the last commit it covered and the round. Round 1 reads the whole
-# pull request, later rounds only the commits since, and after five rounds the
-# review stops and asks the author to rethink, so an agent author and an agent
-# reviewer cannot cycle all night.
+# pull request, later rounds only the commits since. The rounds have no limit.
 #
-#   round.sh plan    writes round, from, comment_id, stop, rerun and max to $GITHUB_OUTPUT
+#   round.sh plan    writes round, from, comment_id, stop and rerun to $GITHUB_OUTPUT
 #   round.sh record  writes the marker comment for this round
 #
 # Reads KIND, PR, BASE_SHA, HEAD_SHA and GH_TOKEN from the environment, and
@@ -14,7 +12,6 @@
 # shellcheck disable=SC2153 # ROUND and FROM come from the environment
 set -euo pipefail
 
-MAX_ROUNDS=5
 marker="<!-- ci-review:$KIND"
 
 case $1 in
@@ -40,23 +37,17 @@ case $1 in
         from=$last_sha
       fi
     fi
-    stop=false
-    if [ "$round" -gt "$MAX_ROUNDS" ] || [ "$rerun" = true ]; then stop=true; fi
+    stop=$rerun
     {
       echo "round=$round"
       echo "from=$from"
       echo "comment_id=$comment_id"
       echo "stop=$stop"
       echo "rerun=$rerun"
-      echo "max=$MAX_ROUNDS"
     } >>"$GITHUB_OUTPUT"
     ;;
   record)
-    if [ "$ROUND" -gt "$MAX_ROUNDS" ]; then
-      text="**${KIND^}**: $MAX_ROUNDS rounds are done and this push brought round $ROUND. No more rounds run on this pull request. Stop fixing line by line: rethink the approach, or ask a code owner."
-    else
-      text="**${KIND^}** round $ROUND of $MAX_ROUNDS covered \`${FROM:0:7}..${HEAD_SHA:0:7}\`."
-    fi
+    text="**${KIND^}** round $ROUND covered \`${FROM:0:7}..${HEAD_SHA:0:7}\`."
     body="$marker sha=$HEAD_SHA round=$ROUND -->
 $text"
     if [ -n "$COMMENT_ID" ]; then
