@@ -62,7 +62,7 @@ QImage TileStore::toImage(Plane plane) const {
 void TileStore::save(Plane plane, std::size_t index) {
   std::vector<bool>& saved = saved_.at(planeIndex(plane));
   if (!saved.at(index)) {
-    open_.push_back({.plane = plane, .index = index, .image = tile(index, plane)});
+    open_.tiles.push_back({.plane = plane, .index = index, .image = tile(index, plane)});
     saved.at(index) = true;
   }
 }
@@ -73,6 +73,7 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_
   if (bounded.isEmpty()) {
     return;
   }
+  open_.revision = ++last_revision_;
   const auto first_column = static_cast<std::size_t>(bounded.left() / kTileSize);
   const auto last_column = static_cast<std::size_t>(bounded.right() / kTileSize);
   const auto first_row = static_cast<std::size_t>(bounded.top() / kTileSize);
@@ -97,10 +98,10 @@ void TileStore::paint(QRect area, const std::function<void(QPainter&, std::size_
 }
 
 void TileStore::commit() {
-  if (open_.empty()) {
+  if (open_.tiles.empty()) {
     return;
   }
-  for (const SavedTile& saved : open_) {
+  for (const SavedTile& saved : open_.tiles) {
     saved_.at(planeIndex(saved.plane)).at(saved.index) = false;
   }
   undo_.push_back(std::exchange(open_, {}));
@@ -117,6 +118,9 @@ void TileStore::clearMask() {
       mask.at(index) = QImage();
       dirty_.at(planeIndex(Plane::Mask)).at(index) = true;
     }
+  }
+  if (!open_.tiles.empty()) {
+    open_.revision = ++last_revision_;
   }
   commit();
 }
@@ -139,7 +143,7 @@ std::size_t TileStore::bytes() const {
 std::size_t TileStore::undoBytes() const {
   std::size_t bytes = 0;
   for (const Step& step : undo_) {
-    for (const SavedTile& saved : step) {
+    for (const SavedTile& saved : step.tiles) {
       bytes += static_cast<std::size_t>(saved.image.sizeInBytes());
     }
   }
@@ -150,9 +154,10 @@ void TileStore::trimUndo() {
   std::size_t bytes = undoBytes();
   std::size_t dropped = 0;
   while (bytes > undo_budget_ && undo_.size() - dropped > 1) {
-    for (const SavedTile& saved : undo_.at(dropped)) {
+    for (const SavedTile& saved : undo_.at(dropped).tiles) {
       bytes -= static_cast<std::size_t>(saved.image.sizeInBytes());
     }
+    base_revision_ = undo_.at(dropped).revision;
     ++dropped;
   }
   undo_.erase(undo_.begin(), undo_.begin() + static_cast<std::ptrdiff_t>(dropped));
@@ -181,11 +186,18 @@ bool TileStore::redo() {
 }
 
 bool TileStore::canUndo() const {
-  return !open_.empty() || !undo_.empty();
+  return !open_.tiles.empty() || !undo_.empty();
 }
 
 bool TileStore::canRedo() const {
-  return open_.empty() && !redo_.empty();
+  return open_.tiles.empty() && !redo_.empty();
+}
+
+std::uint64_t TileStore::revision() const {
+  if (!open_.tiles.empty()) {
+    return open_.revision;
+  }
+  return undo_.empty() ? base_revision_ : undo_.back().revision;
 }
 
 std::vector<std::size_t> TileStore::takeDirty(Plane plane) {
@@ -201,7 +213,7 @@ std::vector<std::size_t> TileStore::takeDirty(Plane plane) {
 }
 
 void TileStore::swapIn(Step& step) {
-  for (SavedTile& saved : step) {
+  for (SavedTile& saved : step.tiles) {
     std::swap(planes_.at(planeIndex(saved.plane)).at(saved.index), saved.image);
     dirty_.at(planeIndex(saved.plane)).at(saved.index) = true;
   }

@@ -2,9 +2,12 @@
 
 #include <QActionGroup>
 #include <QApplication>
+#include <QCloseEvent>
 #include <QColorDialog>
+#include <QDir>
 #include <QDockWidget>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QFormLayout>
 #include <QFutureWatcher>
 #include <QHBoxLayout>
@@ -18,14 +21,17 @@
 #include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
+#include <QStandardPaths>
 #include <QToolBar>
 #include <QtConcurrentRun>
 #include <array>
+#include <optional>
 #include <tuple>
 #include <utility>
 
 #include "canvas/canvas.hpp"
 #include "tiles/tile_store.hpp"
+#include "ui/new_image_dialog.hpp"
 
 namespace pinsel {
 
@@ -62,43 +68,39 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
-struct Loaded {
-  TileStore tiles;
-  QString error;
-};
-
-// Runs on a pool thread, so cutting the image into tiles never stalls the UI.
-Loaded load(const QString& path) {
-  QImageReader reader(path);
-  reader.setAutoTransform(true);
-  const QImage image = reader.read();
-  if (image.isNull()) {
-    return {.tiles = {}, .error = reader.errorString()};
-  }
-  TileStore tiles(image);
-  if (tiles.size().isEmpty()) {
-    return {.tiles = {}, .error = QStringLiteral("Not enough memory to convert the image")};
-  }
-  return {.tiles = std::move(tiles), .error = {}};
+bool isPng(const QString& path) {
+  return path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
 }
 
 }  // namespace
 
-MainWindow::MainWindow(QWidget* parent) : QMainWindow(parent), canvas_(new Canvas(this)) {
-  setWindowTitle(QApplication::applicationName());
+MainWindow::MainWindow(QWidget* parent)
+    : QMainWindow(parent),
+      canvas_(new Canvas(this)),
+      save_watcher_(new QFutureWatcher<QString>(this)) {
+  connect(save_watcher_, &QFutureWatcher<QString>::finished, this, &MainWindow::finishSave);
   resize(1280, 800);
   setCentralWidget(canvas_);
   addMenus();
   addTools();
   addPanels();
+  updateTitle();
 }
 
 void MainWindow::addMenus() {
-  // Actions stay disabled until the feature behind them exists.
   QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
-  file->addAction(QStringLiteral("&Open..."), QKeySequence::Open, this, &MainWindow::chooseImage);
-  file->addAction(QStringLiteral("&Save"), QKeySequence::Save)->setEnabled(false);
-  file->addAction(QStringLiteral("Save &As..."), QKeySequence::SaveAs)->setEnabled(false);
+  replace_actions_ = {
+      file->addAction(QStringLiteral("&New..."), QKeySequence::New, this,
+                      &MainWindow::chooseNewImage),
+      file->addAction(QStringLiteral("&Open..."), QKeySequence::Open, this,
+                      &MainWindow::chooseImage),
+  };
+  save_actions_ = {
+      file->addAction(QStringLiteral("&Save"), QKeySequence::Save, this,
+                      [this] { save([](bool) {}); }),
+      file->addAction(QStringLiteral("Save &As..."), QKeySequence::SaveAs, this,
+                      [this] { saveAs([](bool) {}); }),
+  };
   file->addSeparator();
   file->addAction(QStringLiteral("&Quit"), QKeySequence::Quit, this, &QWidget::close);
 
@@ -113,6 +115,7 @@ void MainWindow::addMenus() {
   const auto updateHistory = [this, undo, redo] {
     undo->setEnabled(canvas_->tiles().canUndo());
     redo->setEnabled(canvas_->tiles().canRedo());
+    updateTitle();
   };
   canvas_->setHistoryChanged(updateHistory);
   updateHistory();
@@ -128,24 +131,202 @@ void MainWindow::addMenus() {
 
 void MainWindow::openImage(const QString& path, std::function<void(const QString& error)> done) {
   const int id = ++latest_open_;
-  auto* watcher = new QFutureWatcher<Loaded>(this);
-  connect(watcher, &QFutureWatcher<Loaded>::finished, this,
+  auto* watcher = new QFutureWatcher<ReadImage>(this);
+  connect(watcher, &QFutureWatcher<ReadImage>::finished, this,
           [this, watcher, id, path, done = std::move(done)] {
-            Loaded loaded = watcher->result();
+            ReadImage read = watcher->result();
             watcher->deleteLater();
             if (id != latest_open_) {
               return;
             }
-            if (loaded.error.isEmpty()) {
-              canvas_->setImage(std::move(loaded.tiles));
-              setWindowFilePath(path);
+            if (read.error.isEmpty()) {
+              showImage(std::move(read.tiles), path);
             }
-            done(loaded.error);
+            done(read.error);
           });
-  watcher->setFuture(QtConcurrent::run(load, path));
+  watcher->setFuture(QtConcurrent::run(readImage, path));
+}
+
+bool MainWindow::newImage(QSize size, const QColor& background) {
+  QImage image(size, TileStore::kFormat);
+  if (image.isNull()) {
+    return false;
+  }
+  image.fill(background);
+  TileStore tiles(image);
+  if (tiles.size().isEmpty()) {
+    return false;
+  }
+  ++latest_open_;
+  showImage(std::move(tiles), QString());
+  return true;
+}
+
+void MainWindow::showImage(TileStore tiles, const QString& path) {
+  canvas_->setImage(std::move(tiles));
+  path_ = path;
+  has_image_ = true;
+  saved_revision_ = canvas_->tiles().revision();
+  updateTitle();
+}
+
+bool MainWindow::isModified() const {
+  return has_image_ && canvas_->tiles().revision() != saved_revision_;
+}
+
+void MainWindow::updateTitle() {
+  const QString app = QApplication::applicationName();
+  if (!has_image_) {
+    setWindowTitle(app);
+  } else {
+    const QString name = path_.isEmpty() ? QStringLiteral("Untitled") : QFileInfo(path_).fileName();
+    setWindowTitle(QStringLiteral("%1[*] - %2").arg(name, app));
+  }
+  setWindowModified(isModified());
+  for (QAction* action : std::as_const(save_actions_)) {
+    action->setEnabled(has_image_ && !pending_save_);
+  }
+  for (QAction* action : std::as_const(replace_actions_)) {
+    action->setEnabled(!pending_save_);
+  }
+}
+
+void MainWindow::whenChangesAreSafe(const std::function<void()>& proceed) {
+  if (!isModified()) {
+    proceed();
+    return;
+  }
+  const QString name = path_.isEmpty() ? QStringLiteral("Untitled") : QFileInfo(path_).fileName();
+  const auto answer = QMessageBox::warning(
+      this, QStringLiteral("Unsaved Changes"),
+      QStringLiteral("Save the changes to %1? Without saving, they are lost.").arg(name),
+      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel, QMessageBox::Save);
+  if (answer == QMessageBox::Discard) {
+    proceed();
+  } else if (answer == QMessageBox::Save) {
+    save([proceed](bool saved) {
+      if (saved) {
+        proceed();
+      }
+    });
+  }
+}
+
+void MainWindow::save(const std::function<void(bool saved)>& done) {
+  // Save never writes PNG bytes into a file another format named.
+  if (isPng(path_)) {
+    saveTo(path_, done);
+  } else {
+    saveAs(done);
+  }
+}
+
+void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
+  const QFileInfo current(path_);
+  const QString suggested =
+      path_.isEmpty() ? QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
+                            .filePath(QStringLiteral("Untitled.png"))
+                      : current.dir().filePath(current.completeBaseName() + QStringLiteral(".png"));
+  QFileDialog dialog(this, QStringLiteral("Save Image"), suggested,
+                     QStringLiteral("PNG image (*.png)"));
+  dialog.setAcceptMode(QFileDialog::AcceptSave);
+  // Adds .png before the dialog's own overwrite check, so the check sees the
+  // file that will be written.
+  dialog.setDefaultSuffix(QStringLiteral("png"));
+  if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
+    done(false);
+    return;
+  }
+  QString path = dialog.selectedFiles().constFirst();
+  if (!isPng(path)) {
+    // A name with another suffix, such as photo.jpg, gets .png on top, which
+    // the dialog never checked.
+    path += QStringLiteral(".png");
+    if (QFileInfo::exists(path) &&
+        QMessageBox::question(
+            this, QStringLiteral("Save Image"),
+            QStringLiteral("%1 already exists. Replace it?").arg(QFileInfo(path).fileName())) !=
+            QMessageBox::Yes) {
+      done(false);
+      return;
+    }
+  }
+  saveTo(path, done);
+}
+
+void MainWindow::saveTo(const QString& path, const std::function<void(bool saved)>& done) {
+  if (!has_image_ || pending_save_) {
+    done(false);
+    return;
+  }
+  pending_save_ = PendingSave{
+      .path = path,
+      .revision = canvas_->tiles().revision(),
+      .document = latest_open_,
+      .done = done,
+  };
+  save_watcher_->setFuture(QtConcurrent::run(writePng, canvas_->tiles().toImage(), path));
+  updateTitle();
+}
+
+void MainWindow::finishSave() {
+  if (!pending_save_) {
+    return;
+  }
+  const PendingSave saved = std::move(*pending_save_);
+  pending_save_.reset();
+  const QString error = save_watcher_->result();
+  if (error.isEmpty() && saved.document == latest_open_) {
+    path_ = saved.path;
+    saved_revision_ = saved.revision;
+  }
+  updateTitle();
+  if (!error.isEmpty()) {
+    QMessageBox::warning(this, QStringLiteral("Save Image"),
+                         QStringLiteral("Could not save %1: %2").arg(saved.path, error));
+  }
+  saved.done(error.isEmpty());
+  if (std::exchange(close_after_save_, false)) {
+    close();
+  }
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+  if (close_approved_) {
+    event->accept();
+    return;
+  }
+  event->ignore();
+  if (pending_save_) {
+    close_after_save_ = true;
+    return;
+  }
+  whenChangesAreSafe([this] {
+    close_approved_ = true;
+    close();
+  });
+}
+
+void MainWindow::chooseNewImage() {
+  const std::optional<NewImage> chosen = askNewImage(this);
+  if (!chosen) {
+    return;
+  }
+  whenChangesAreSafe([this, chosen] {
+    if (!newImage(chosen->size, chosen->background)) {
+      QMessageBox::warning(this, QStringLiteral("New Image"),
+                           QStringLiteral("Not enough memory for a %1 x %2 image.")
+                               .arg(chosen->size.width())
+                               .arg(chosen->size.height()));
+    }
+  });
 }
 
 void MainWindow::chooseImage() {
+  whenChangesAreSafe([this] { askAndOpen(); });
+}
+
+void MainWindow::askAndOpen() {
   QStringList patterns;
   for (const QByteArray& format : QImageReader::supportedImageFormats()) {
     patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
