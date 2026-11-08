@@ -185,11 +185,22 @@ if(BUILD_TESTING)
            COMMAND pinsel --screenshot ${SHOTS}/inpaint-1080p.png --size 1920x1080
                    --open ${PATTERN} --lasso "300,200 700,180 760,560 340,600"
                    --load-model sdxl.safetensors --inpaint "a red fox")
+  # An inpaint that cannot start, with no mask or with no model, quits with an
+  # error rather than waiting for a layer.
+  add_test(NAME inpaint_without_mask
+           COMMAND pinsel --screenshot ${SHOTS}/unused.png --new 512x512
+                   --load-model sdxl.safetensors --inpaint fox)
+  add_test(NAME inpaint_without_model
+           COMMAND pinsel --screenshot ${SHOTS}/unused.png --new 512x512
+                   --lasso "10,10 100,10 100,100" --load-model missing --inpaint fox)
+  set_property(TEST inpaint_without_mask inpaint_without_model PROPERTY WILL_FAIL TRUE)
+  set_property(TEST inpaint_without_mask inpaint_without_model PROPERTY TIMEOUT 60)
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
   set(SCREENSHOT_TESTS screenshot_1080p screenshot_4k screenshot_new screenshot_layers
                        screenshot_openraster screenshot_lasso screenshot_engine_loaded
-                       screenshot_engine_stopped screenshot_inpaint)
+                       screenshot_engine_stopped screenshot_inpaint inpaint_without_mask
+                       inpaint_without_model)
   set_property(TEST ${SCREENSHOT_TESTS} PROPERTY ENVIRONMENT_MODIFICATION
                QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
   set_property(TEST screenshot_1080p screenshot_new screenshot_layers screenshot_openraster
@@ -198,7 +209,7 @@ if(BUILD_TESTING)
                PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
   set_property(TEST screenshot_engine_loaded screenshot_engine_stopped screenshot_inpaint
-               APPEND PROPERTY ENVIRONMENT_MODIFICATION
+               inpaint_without_mask inpaint_without_model APPEND PROPERTY ENVIRONMENT_MODIFICATION
                PINSEL_ENGINE=set:$<TARGET_FILE:fake-engine>)
   # Windows draws with its native platform to show the real style; offscreen has
   # no fonts there.

@@ -47,7 +47,7 @@ class MainWindow : public QMainWindow {
   void loadModel(const QString& path,
                  std::function<void(const std::optional<EngineFailure>&)> ended);
   // Inpaints the mask with prompt, as Generate in the prompt panel does, and
-  // calls done with whether a layer was added, unless nothing was sent.
+  // calls done with whether a layer was added.
   void inpaint(const QString& prompt, const std::function<void(bool added)>& done);
 
  protected:

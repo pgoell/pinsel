@@ -27,7 +27,7 @@ class PromptPanel : public QWidget {
   using Ended =
       std::function<void(const std::optional<EngineFailure>& failure, const QString& output)>;
   // Sends request to the engine and calls ended once it ends. Returns false,
-  // and never calls ended, when it sent nothing.
+  // and never calls ended, when no model is loaded.
   using Run = std::function<bool(const InpaintRequest& request, Ended ended)>;
   // Names the image on the canvas; it changes when another image replaces it.
   using Document = std::function<int()>;
@@ -40,7 +40,8 @@ class PromptPanel : public QWidget {
   PromptPanel& operator=(PromptPanel&&) = delete;
 
   void setPrompt(const QString& prompt);
-  // Calls done with whether a layer was added, unless nothing was sent.
+  // Calls done with whether a layer was added, false at once when nothing can
+  // be sent.
   void generate(const std::function<void(bool added)>& done = {});
 
  private:

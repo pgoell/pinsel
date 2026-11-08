@@ -112,11 +112,13 @@ void PromptPanel::say(const QString& text) {
 }
 
 void PromptPanel::generate(const std::function<void(bool added)>& done) {
-  if (pending_) {
-    return;
-  }
-  if (!canvas_->tiles().hasMask()) {
-    say(QStringLiteral("Paint a mask over the part to redraw."));
+  if (pending_ || !canvas_->tiles().hasMask()) {
+    if (!pending_) {
+      say(QStringLiteral("Paint a mask over the part to redraw."));
+    }
+    if (done) {
+      done(false);
+    }
     return;
   }
   if (!files_) {
@@ -172,10 +174,11 @@ void PromptPanel::generate(const std::function<void(bool added)>& done) {
 }
 
 void PromptPanel::send(const InpaintRequest& request) {
-  if (pending_->document != document_() ||
-      !run_(request, [this](const std::optional<EngineFailure>& failure, const QString& output) {
-        place(failure, output);
-      })) {
+  if (pending_->document != document_()) {
+    end(false);
+  } else if (!run_(request, [this](const std::optional<EngineFailure>& failure,
+                                   const QString& output) { place(failure, output); })) {
+    say(QStringLiteral("Load a model first, with Diffusion > Load Model."));
     end(false);
   }
 }

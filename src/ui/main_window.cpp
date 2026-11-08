@@ -199,8 +199,6 @@ void MainWindow::inpaint(const QString& prompt, const std::function<void(bool ad
 
 bool MainWindow::runInpaint(const InpaintRequest& request, PromptPanel::Ended ended) {
   if (model_.isEmpty()) {
-    QMessageBox::information(this, QStringLiteral("Inpaint"),
-                             QStringLiteral("Load a model first, with Diffusion > Load Model."));
     return false;
   }
   const int job = engine_->inpaint(request);
