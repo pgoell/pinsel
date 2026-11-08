@@ -64,6 +64,11 @@ target_link_libraries(pinsel-engine PUBLIC Qt6::Core)
 target_compile_definitions(pinsel-engine PRIVATE PINSEL_SIDECAR_DIR="${CMAKE_SOURCE_DIR}/sidecar")
 target_compile_options(pinsel-engine PRIVATE ${WARNINGS})
 
+# Crops the mask's region for the model and lays the answer back as a layer.
+add_library(pinsel-inpaint src/inpaint/inpaint.cpp)
+target_link_libraries(pinsel-inpaint PUBLIC pinsel-tiles)
+target_compile_options(pinsel-inpaint PRIVATE ${WARNINGS})
+
 add_library(pinsel-canvas src/canvas/canvas.cpp src/canvas/view.cpp src/canvas/gpu/textures.cpp
                           src/canvas/gpu/frame.cpp)
 target_include_directories(pinsel-canvas PUBLIC src)
@@ -84,10 +89,11 @@ target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 
 qt_add_executable(pinsel WIN32 src/app/main.cpp src/ui/main_window.cpp src/ui/dialogs/new_image_dialog.cpp
                   src/ui/theme.cpp src/ui/layers/layers_panel.cpp
-                  src/ui/engine/engine_status.cpp)
+                  src/ui/engine/engine_status.cpp src/ui/engine/prompt_panel.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
-target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas pinsel-engine Qt6::Concurrent)
+target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas pinsel-engine pinsel-inpaint
+                                     Qt6::Concurrent)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
 add_executable(bench bench/pan_zoom.cpp)
@@ -114,16 +120,17 @@ if(BUILD_TESTING)
 
   add_executable(tests tests/test_brush.cpp tests/canvas/test_canvas.cpp tests/test_memory.cpp
                        tests/test_project.cpp tests/canvas/test_view.cpp tests/tiles/test_tile_store.cpp
-                       tests/tiles/test_image_file.cpp tests/engine/test_engine.cpp)
+                       tests/tiles/test_image_file.cpp tests/engine/test_engine.cpp
+                       tests/engine/test_inpaint.cpp)
   target_link_libraries(tests PRIVATE pinsel-lib pinsel-canvas pinsel-brush pinsel-tiles
-                                      pinsel-engine GTest::gtest_main)
+                                      pinsel-engine pinsel-inpaint GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
   target_compile_definitions(tests PRIVATE PINSEL_SCREENSHOTS="${SHOTS}"
                                            PINSEL_FAKE_ENGINE="$<TARGET_FILE:fake-engine>")
 
   # Stands in for the Python sidecar, so the tests need no Python.
   add_executable(fake-engine tests/engine/fake_engine.cpp)
-  target_link_libraries(fake-engine PRIVATE Qt6::Core)
+  target_link_libraries(fake-engine PRIVATE Qt6::Gui)
   target_compile_options(fake-engine PRIVATE ${WARNINGS})
   add_dependencies(tests fake-engine)
   # The load peak test reads the heap through AddressSanitizer's allocator.
@@ -172,18 +179,25 @@ if(BUILD_TESTING)
   add_test(NAME screenshot_engine_stopped
            COMMAND pinsel --screenshot ${SHOTS}/engine-stopped-1080p.png --size 1920x1080
                    --new 1024x768 --load-model crash)
+  # A mask on the pattern inpainted by the fake engine, which inverts the masked
+  # part: the result layer sits in the panel above the image.
+  add_test(NAME screenshot_inpaint
+           COMMAND pinsel --screenshot ${SHOTS}/inpaint-1080p.png --size 1920x1080
+                   --open ${PATTERN} --lasso "300,200 700,180 760,560 340,600"
+                   --load-model sdxl.safetensors --inpaint "a red fox")
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
   set(SCREENSHOT_TESTS screenshot_1080p screenshot_4k screenshot_new screenshot_layers
                        screenshot_openraster screenshot_lasso screenshot_engine_loaded
-                       screenshot_engine_stopped)
+                       screenshot_engine_stopped screenshot_inpaint)
   set_property(TEST ${SCREENSHOT_TESTS} PROPERTY ENVIRONMENT_MODIFICATION
                QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
   set_property(TEST screenshot_1080p screenshot_new screenshot_layers screenshot_openraster
-               screenshot_lasso screenshot_engine_loaded screenshot_engine_stopped APPEND
+               screenshot_lasso screenshot_engine_loaded screenshot_engine_stopped
+               screenshot_inpaint APPEND
                PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
-  set_property(TEST screenshot_engine_loaded screenshot_engine_stopped
+  set_property(TEST screenshot_engine_loaded screenshot_engine_stopped screenshot_inpaint
                APPEND PROPERTY ENVIRONMENT_MODIFICATION
                PINSEL_ENGINE=set:$<TARGET_FILE:fake-engine>)
   # Windows draws with its native platform to show the real style; offscreen has

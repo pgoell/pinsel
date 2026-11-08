@@ -233,6 +233,26 @@ void TileStore::addLayer() {
   });
 }
 
+bool TileStore::addLayer(const LayerContent& content) {
+  if (layers_.empty()) {
+    return false;
+  }
+  Layer layer = emptyLayer();
+  if (!fillLayer(layer, content.image, content.offset, kFormat)) {
+    return false;
+  }
+  restack([this, &content, &layer] {
+    layer.id = ++last_layer_id_;
+    layer.name = content.name;
+    layer.visible = content.visible;
+    layer.opacity = std::clamp(content.opacity, 0.0, 1.0);
+    layer.blend = content.blend;
+    ++current_;
+    layers_.insert(layers_.begin() + static_cast<std::ptrdiff_t>(current_), std::move(layer));
+  });
+  return true;
+}
+
 bool TileStore::removeLayer() {
   if (layers_.size() < 2) {
     return false;

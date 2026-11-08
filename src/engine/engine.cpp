@@ -87,6 +87,33 @@ int Engine::load(const QString& model) {
 }
 
 int Engine::generate(const GenerateRequest& request) {
+  return submit({
+      {"op", "generate"},
+      {"prompt", request.prompt},
+      {"negative_prompt", request.negative_prompt},
+      {"steps", request.steps},
+      {"seed", static_cast<qint64>(request.seed)},
+      {"width", request.size.width()},
+      {"height", request.size.height()},
+      {"output", request.output},
+  });
+}
+
+int Engine::inpaint(const InpaintRequest& request) {
+  return submit({
+      {"op", "inpaint"},
+      {"prompt", request.prompt},
+      {"negative_prompt", request.negative_prompt},
+      {"steps", request.steps},
+      {"seed", static_cast<qint64>(request.seed)},
+      {"strength", request.strength},
+      {"image", request.image},
+      {"mask", request.mask},
+      {"output", request.output},
+  });
+}
+
+int Engine::submit(QJsonObject request) {
   const int job = ++next_job_;
   open_.insert(job);
   start();
@@ -98,17 +125,8 @@ int Engine::generate(const GenerateRequest& request) {
     send(lineOf({{"op", "load"}, {"job", reload}, {"model", model_}}));
   }
   owner_[job] = job;
-  send(lineOf({
-      {"op", "generate"},
-      {"job", job},
-      {"prompt", request.prompt},
-      {"negative_prompt", request.negative_prompt},
-      {"steps", request.steps},
-      {"seed", static_cast<qint64>(request.seed)},
-      {"width", request.size.width()},
-      {"height", request.size.height()},
-      {"output", request.output},
-  }));
+  request.insert(QStringLiteral("job"), job);
+  send(lineOf(request));
   return job;
 }
 

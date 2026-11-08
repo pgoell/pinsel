@@ -10,6 +10,7 @@
 #include <memory>
 #include <set>
 
+class QJsonObject;
 class QProcess;
 
 namespace pinsel {
@@ -21,6 +22,20 @@ struct GenerateRequest {
   std::uint32_t seed = 0;
   QSize size{1024, 1024};
   // Where the engine writes the image, as a PNG.
+  QString output;
+};
+
+// Redraws the white part of mask in image. Both are PNGs of the same size,
+// which the output keeps.
+struct InpaintRequest {
+  QString prompt;
+  QString negative_prompt;
+  int steps = 30;
+  std::uint32_t seed = 0;
+  // How far from the image the masked part may go: 1 starts it from noise.
+  double strength = 1.0;
+  QString image;
+  QString mask;
   QString output;
 };
 
@@ -73,6 +88,7 @@ class Engine {
   // Each returns the new job's id.
   int load(const QString& model);
   int generate(const GenerateRequest& request);
+  int inpaint(const InpaintRequest& request);
   // Does nothing for a job that has ended.
   void cancel(int job);
   [[nodiscard]] bool busy() const {
@@ -80,6 +96,8 @@ class Engine {
   }
 
  private:
+  // Sends a job that needs the model, loading it first after a restart.
+  int submit(QJsonObject request);
   void start();
   void send(const QByteArray& line);
   void readEvents();

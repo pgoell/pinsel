@@ -16,6 +16,8 @@
 #include "brush/brush.hpp"
 #include "engine/engine.hpp"
 #include "tiles/tile_store.hpp"
+#include "ui/engine/engine_status.hpp"
+#include "ui/engine/prompt_panel.hpp"
 
 class QAction;
 class QCloseEvent;
@@ -23,7 +25,6 @@ class QCloseEvent;
 namespace pinsel {
 
 class Canvas;
-class EngineStatus;
 class LayersPanel;
 
 class MainWindow : public QMainWindow {
@@ -45,6 +46,9 @@ class MainWindow : public QMainWindow {
   // or with none once it is loaded. The status bar shows its progress.
   void loadModel(const QString& path,
                  std::function<void(const std::optional<EngineFailure>&)> ended);
+  // Inpaints the mask with prompt, as Generate in the prompt panel does, and
+  // calls done with whether a layer was added, unless nothing was sent.
+  void inpaint(const QString& prompt, const std::function<void(bool added)>& done);
 
  protected:
   void closeEvent(QCloseEvent* event) override;
@@ -55,7 +59,8 @@ class MainWindow : public QMainWindow {
   void chooseNewImage();
   void chooseModel();
   void cancelJobs();
-  void endJob(int job, const std::optional<EngineFailure>& failure);
+  void endJob(int job, const std::optional<EngineFailure>& failure, const QString& output);
+  bool runInpaint(const InpaintRequest& request, PromptPanel::Ended ended);
   void showImage(TileStore tiles, const QString& path);
   [[nodiscard]] bool isModified() const;
   void updateTitle();
@@ -77,12 +82,16 @@ class MainWindow : public QMainWindow {
   Canvas* canvas_ = nullptr;
   LayersPanel* layers_ = nullptr;
   EngineStatus* engine_status_ = nullptr;
+  PromptPanel* prompt_ = nullptr;
   std::unique_ptr<Engine> engine_;
   struct EngineJob {
+    EngineStatus::Job kind = EngineStatus::Job::Load;
     QString model;
-    std::function<void(const std::optional<EngineFailure>&)> ended;
+    PromptPanel::Ended ended;
   };
   std::map<int, EngineJob> engine_jobs_;
+  // The model the engine holds once its queued loads end.
+  QString model_;
   BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;

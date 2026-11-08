@@ -44,6 +44,31 @@ QSize sizeOf(QCommandLineParser& parser, const QCommandLineOption& option) {
   return {width, height};
 }
 
+// Loads the model, then inpaints the mask with prompt, skipping each step whose
+// value is empty, then calls ready. Quits when the inpaint adds no layer.
+void loadAndInpaint(pinsel::MainWindow& window, const QString& model, const QString& prompt,
+                    const std::function<void()>& ready) {
+  const std::function<void()> inpaint = [&window, prompt, ready] {
+    if (prompt.isEmpty()) {
+      ready();
+      return;
+    }
+    window.inpaint(prompt, [ready](bool added) {
+      if (added) {
+        ready();
+      } else {
+        qCritical("The inpaint added no layer");
+        QApplication::exit(1);
+      }
+    });
+  };
+  if (model.isEmpty()) {
+    inpaint();
+  } else {
+    window.loadModel(model, [inpaint](const std::optional<pinsel::EngineFailure>&) { inpaint(); });
+  }
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -75,8 +100,13 @@ int main(int argc, char** argv) {
       QStringLiteral("load-model"),
       QStringLiteral("Load an SDXL checkpoint; a screenshot waits until the load ends."),
       QStringLiteral("path"));
+  const QCommandLineOption inpaint(
+      QStringLiteral("inpaint"),
+      QStringLiteral("After the model loads, inpaint the mask; a screenshot waits for the layer."),
+      QStringLiteral("prompt"));
   parser.addOption(screenshot);
   parser.addOption(model);
+  parser.addOption(inpaint);
   parser.addOption(lasso);
   parser.addOption(layers);
   parser.addOption(open);
@@ -105,6 +135,9 @@ int main(int argc, char** argv) {
     QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
   };
   const std::function<void()> ready = parser.isSet(screenshot) ? saveScreenshot : [] {};
+  const std::function<void()> afterOpen = [&] {
+    loadAndInpaint(window, parser.value(model), parser.value(inpaint), ready);
+  };
   if (parser.isSet(open)) {
     window.openImage(parser.value(open), [&](const QString& error) {
       window.addLayers(layer_count);
@@ -113,14 +146,11 @@ int main(int argc, char** argv) {
         qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
         QApplication::exit(1);
       } else {
-        ready();
+        afterOpen();
       }
     });
-  } else if (parser.isSet(model)) {
-    window.loadModel(parser.value(model),
-                     [&](const std::optional<pinsel::EngineFailure>&) { ready(); });
   } else {
-    QTimer::singleShot(0, &window, ready);
+    QTimer::singleShot(0, &window, afterOpen);
   }
   return QApplication::exec();
 }
