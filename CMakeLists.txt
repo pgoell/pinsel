@@ -193,7 +193,8 @@ if(BUILD_TESTING)
   add_test(NAME inpaint_without_model
            COMMAND pinsel --screenshot ${SHOTS}/unused.png --new 512x512
                    --lasso "10,10 100,10 100,100" --load-model missing --inpaint fox)
-  set_property(TEST inpaint_without_mask inpaint_without_model PROPERTY WILL_FAIL TRUE)
+  set_property(TEST inpaint_without_mask inpaint_without_model
+               PROPERTY PASS_REGULAR_EXPRESSION "The inpaint added no layer")
   set_property(TEST inpaint_without_mask inpaint_without_model PROPERTY TIMEOUT 60)
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.

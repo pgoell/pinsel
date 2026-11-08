@@ -18,7 +18,7 @@ Every request carries a `job` id that pinsel picks. The engine runs jobs one at 
 | --- | --- |
 | `load` | `model`: path to an SDXL checkpoint, which must be `.safetensors`. Lets go of the model held before. |
 | `generate` | `prompt`, `negative_prompt`, `steps`, `seed`, `width`, `height`, `output`: path for the PNG. Needs a loaded model. |
-| `inpaint` | `prompt`, `negative_prompt`, `steps`, `seed`, `strength` (above 0, up to 1: how far the masked part may move from the image; 1 starts it from noise; at least one step runs at any strength), `image` and `mask`: paths to PNGs of the same size, `output`: path for the PNG, at that size. Redraws where the mask is white and keeps the rest. Needs a loaded model; the sizes should be multiples of 64. |
+| `inpaint` | `prompt`, `negative_prompt`, `steps`, `seed`, `strength` (0.001 to 1: how far the masked part may move from the image; 1 starts it from noise; a low strength adds steps so at least one runs), `image` and `mask`: paths to PNGs of the same size, `output`: path for the PNG, at that size. Redraws where the mask is white and keeps the rest. Needs a loaded model; the sizes should be multiples of 64. |
 | `cancel` | Ends the job named by `job` at its next progress report, or before it starts. |
 
 | Event | Fields |
