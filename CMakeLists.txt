@@ -87,17 +87,29 @@ else()
 endif()
 target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 
+# What the process holds, for the bench and pinsel --memory-report.
+add_library(pinsel-memory src/app/memory.cpp)
+target_include_directories(pinsel-memory PUBLIC src)
+target_link_libraries(pinsel-memory PUBLIC Qt6::Core)
+if(WIN32)
+  target_link_libraries(pinsel-memory PRIVATE dxgi dxguid)
+endif()
+if(SANITIZE)
+  target_compile_definitions(pinsel-memory PRIVATE PINSEL_ASAN)
+endif()
+target_compile_options(pinsel-memory PRIVATE ${WARNINGS})
+
 qt_add_executable(pinsel WIN32 src/app/main.cpp src/ui/main_window.cpp src/ui/dialogs/new_image_dialog.cpp
                   src/ui/theme.cpp src/ui/layers/layers_panel.cpp
                   src/ui/engine/engine_status.cpp src/ui/engine/prompt_panel.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
 target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas pinsel-engine pinsel-inpaint
-                                     Qt6::Concurrent)
+                                     pinsel-memory Qt6::Concurrent)
 target_compile_options(pinsel PRIVATE ${WARNINGS})
 
 add_executable(bench bench/pan_zoom.cpp)
-target_link_libraries(bench PRIVATE pinsel-canvas benchmark::benchmark)
+target_link_libraries(bench PRIVATE pinsel-canvas pinsel-memory benchmark::benchmark)
 target_compile_options(bench PRIVATE ${WARNINGS})
 
 include(CTest)
@@ -126,13 +138,14 @@ if(BUILD_TESTING)
                                       pinsel-engine pinsel-inpaint GTest::gtest_main)
   target_compile_options(tests PRIVATE ${WARNINGS})
   target_compile_definitions(tests PRIVATE PINSEL_SCREENSHOTS="${SHOTS}"
-                                           PINSEL_FAKE_ENGINE="$<TARGET_FILE:fake-engine>")
+                                           PINSEL_FAKE_ENGINE="$<TARGET_FILE:fake-engine>"
+                                           PINSEL_EXE="$<TARGET_FILE:pinsel>")
 
   # Stands in for the Python sidecar, so the tests need no Python.
   add_executable(fake-engine tests/engine/fake_engine.cpp)
   target_link_libraries(fake-engine PRIVATE Qt6::Gui)
   target_compile_options(fake-engine PRIVATE ${WARNINGS})
-  add_dependencies(tests fake-engine)
+  add_dependencies(tests fake-engine pinsel)
   # The load peak test reads the heap through AddressSanitizer's allocator.
   if(SANITIZE)
     target_compile_definitions(tests PRIVATE PINSEL_ASAN)

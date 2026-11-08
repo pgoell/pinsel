@@ -294,6 +294,10 @@ void MainWindow::showImage(TileStore tiles, const QString& path) {
   updateTitle();
 }
 
+const TileStore& MainWindow::tiles() const {
+  return canvas_->tiles();
+}
+
 bool MainWindow::isModified() const {
   return has_image_ && canvas_->tiles().revision() != saved_revision_;
 }

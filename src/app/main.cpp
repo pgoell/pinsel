@@ -1,14 +1,20 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPointF>
 #include <QPolygonF>
+#include <QSaveFile>
 #include <QSize>
 #include <QStringList>
 #include <QTimer>
+#include <chrono>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 
+#include "app/memory.hpp"
 #include "app/project.hpp"
 #include "ui/main_window.hpp"
 #include "ui/theme.hpp"
@@ -69,6 +75,66 @@ void loadAndInpaint(pinsel::MainWindow& window, const QString& model, const QStr
   }
 }
 
+double toMiB(std::size_t bytes) {
+  return static_cast<double>(bytes) / (1024.0 * 1024.0);
+}
+
+// Writes what the process, the image and the engine hold, as JSON. Returns
+// false when the file could not be written.
+bool writeMemoryReport(const pinsel::MainWindow& window, const QString& path) {
+  const pinsel::TileStore& tiles = window.tiles();
+  QJsonObject report{
+      {QStringLiteral("process"), pinsel::toJson(pinsel::measureMemory())},
+      {
+          QStringLiteral("image"),
+          QJsonObject{
+              {QStringLiteral("tiles_mb"), toMiB(tiles.bytes())},
+              {QStringLiteral("undo_mb"), toMiB(tiles.undoBytes())},
+          },
+      },
+  };
+  if (const std::optional<pinsel::EngineMemory>& gpu = window.engineMemory()) {
+    report.insert(QStringLiteral("engine"), QJsonObject{
+                                                {QStringLiteral("free_mb"), gpu->free_mb},
+                                                {QStringLiteral("total_mb"), gpu->total_mb},
+                                                {QStringLiteral("peak_mb"), gpu->peak_mb},
+                                            });
+  }
+  QSaveFile file(path);
+  return file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(report).toJson()) >= 0 &&
+         file.commit();
+}
+
+// What to do once the image, the model and the inpaint are ready: write the
+// memory report, then save the screenshot, skipping each step whose path is
+// empty, then quit. With neither, the window stays open.
+std::function<void()> whenReady(pinsel::MainWindow& window, const QString& screenshot,
+                                const QString& report) {
+  const std::function<void()> saveScreenshot = [&window, screenshot] {
+    if (screenshot.isEmpty()) {
+      QApplication::exit(0);
+    } else {
+      QApplication::exit(window.grab().save(screenshot) ? 0 : 1);
+    }
+  };
+  if (report.isEmpty()) {
+    return screenshot.isEmpty() ? std::function<void()>([] {}) : saveScreenshot;
+  }
+  return [&window, report, saveScreenshot] {
+    // The frame after an upload trims the driver's upload memory, and the
+    // driver frees some of it a little later.
+    constexpr auto kSettle = std::chrono::seconds(2);
+    QTimer::singleShot(kSettle, &window, [&window, report, saveScreenshot] {
+      if (writeMemoryReport(window, report)) {
+        saveScreenshot();
+      } else {
+        qCritical("Could not write %s", qPrintable(report));
+        QApplication::exit(1);
+      }
+    });
+  };
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -104,7 +170,14 @@ int main(int argc, char** argv) {
       QStringLiteral("inpaint"),
       QStringLiteral("After the model loads, inpaint the mask; a screenshot waits for the layer."),
       QStringLiteral("prompt"));
+  const QCommandLineOption memory(
+      QStringLiteral("memory-report"),
+      QStringLiteral("When the image is ready, wait for the GPU to settle, then save what the "
+                     "process, the image and the engine hold as JSON. Quits unless --screenshot "
+                     "follows."),
+      QStringLiteral("path"));
   parser.addOption(screenshot);
+  parser.addOption(memory);
   parser.addOption(model);
   parser.addOption(inpaint);
   parser.addOption(lasso);
@@ -131,10 +204,8 @@ int main(int argc, char** argv) {
     window.setAttribute(Qt::WA_DontShowOnScreen);
   }
   window.show();
-  const std::function<void()> saveScreenshot = [&] {
-    QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
-  };
-  const std::function<void()> ready = parser.isSet(screenshot) ? saveScreenshot : [] {};
+  const std::function<void()> ready =
+      whenReady(window, parser.value(screenshot), parser.value(memory));
   const std::function<void()> afterOpen = [&] {
     loadAndInpaint(window, parser.value(model), parser.value(inpaint), ready);
   };

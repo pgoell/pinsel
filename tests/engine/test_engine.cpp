@@ -26,6 +26,7 @@ namespace {
 
 using pinsel::Engine;
 using pinsel::EngineFailure;
+using pinsel::EngineMemory;
 using pinsel::EngineProgress;
 using pinsel::GenerateRequest;
 using Kind = EngineFailure::Kind;
@@ -143,6 +144,17 @@ TEST(Engine, ReportsEachStepAndTheOutput) {
   EXPECT_EQ(ended.output, QStringLiteral("out.png"));
   EXPECT_EQ(h.counts(job, kGenerate), (std::vector<int>{1, 2, 3, 4}));
   EXPECT_FALSE(h.engine.busy());
+}
+
+TEST(Engine, KeepsTheGpuMemoryTheLastJobReported) {
+  Harness h;
+  EXPECT_FALSE(h.engine.memory().has_value());
+  h.engine.load(kModel);
+  EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox"), 1))).message(), "");
+  const EngineMemory memory = h.engine.memory().value_or(EngineMemory{});
+  EXPECT_EQ(memory.free_mb, 1024.0);
+  EXPECT_EQ(memory.total_mb, 8192.0);
+  EXPECT_EQ(memory.peak_mb, 6912.0);
 }
 
 TEST(Engine, CancelEndsTheRunningJob) {

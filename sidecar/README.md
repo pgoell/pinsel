@@ -25,7 +25,7 @@ Every request carries a `job` id that pinsel picks. The engine runs jobs one at 
 | --- | --- |
 | `ready` | `engine`: its name. Sent once, first. |
 | `progress` | `job`, `stage` (`load`, or `generate` for both `generate` and `inpaint`), `done`, `total`. |
-| `done` | `job`, and `output` for `generate` and `inpaint`. |
+| `done` | `job`, and `output` for `generate` and `inpaint`. An engine on a GPU may add `gpu`: `free_mb` and `total_mb` for the whole card after the job, and `peak_mb`, the most the engine held during it. |
 | `error` | `job` (null for a line it could not read), `kind` (`cancelled`, `oom` or `failed`), `message`. |
 
 After `oom` the engine has freed what it could and keeps running. After a `load` ends in any error it holds no model. A cancel that arrives after a job's last progress report changes nothing: the job ends `done`. If the process ends, pinsel fails every open job and starts it again for the next one, loading the last model first.

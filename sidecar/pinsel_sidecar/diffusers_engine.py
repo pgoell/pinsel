@@ -29,8 +29,10 @@ class DiffusersEngine:
         handlers = {"load": self._load, "generate": self._generate, "inpaint": self._inpaint}
         if op not in handlers:
             raise ValueError(f"unknown op {op!r}")
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         try:
-            return handlers[op](job)
+            return handlers[op](job) | self._memory()
         except torch.cuda.OutOfMemoryError as error:
             message = str(error).splitlines()[0]
         # Out of the except block: its traceback holds the frames, and with them
@@ -41,6 +43,15 @@ class DiffusersEngine:
     def unload(self) -> None:
         self.pipe = None
         self._free()
+
+    def _memory(self) -> dict[str, Any]:
+        """The GPU's memory after the job and the most this process held during it, in MiB."""
+        if self.device != "cuda":
+            return {}
+        free, total = torch.cuda.mem_get_info()
+        mib = 1024 * 1024
+        peak = torch.cuda.max_memory_reserved()
+        return {"gpu": {"free_mb": free / mib, "total_mb": total / mib, "peak_mb": peak / mib}}
 
     def _free(self) -> None:
         gc.collect()
