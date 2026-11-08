@@ -19,6 +19,7 @@ class QCloseEvent;
 namespace pinsel {
 
 class Canvas;
+class LayersPanel;
 
 class MainWindow : public QMainWindow {
  public:
@@ -31,6 +32,8 @@ class MainWindow : public QMainWindow {
   // Starts an untitled image of size, filled with background. Returns false
   // when there is no memory for it.
   bool newImage(QSize size, const QColor& background);
+  // Puts count empty layers above the current one.
+  void addLayers(int count);
 
  protected:
   void closeEvent(QCloseEvent* event) override;
@@ -58,6 +61,7 @@ class MainWindow : public QMainWindow {
   void addPanels();
 
   Canvas* canvas_ = nullptr;
+  LayersPanel* layers_ = nullptr;
   BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;

@@ -6,9 +6,11 @@
 #include <QMatrix4x4>
 #include <QMouseEvent>
 #include <QWheelEvent>
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
+#include <cstdint>
 #include <tracy/Tracy.hpp>
 #include <tuple>
 #include <utility>
@@ -53,12 +55,14 @@ void appendQuad(std::vector<float>& vertices, QRect rect) {
 }  // namespace
 
 struct Canvas::Gpu {
+  // One plane's texture for one tile. Null while the store's tile is null.
   struct Tile {
-    QRect rect;
     std::unique_ptr<QRhiTexture> texture;
-    // Null while the tile has no mask; the bindings then use empty_mask.
-    std::unique_ptr<QRhiTexture> mask;
     std::unique_ptr<QRhiShaderResourceBindings> bindings;
+  };
+  struct Layer {
+    std::uint64_t id = 0;
+    std::vector<Tile> tiles;
   };
 
   QRhi* rhi = nullptr;
@@ -69,10 +73,16 @@ struct Canvas::Gpu {
   // set, so it holds a texture of its own that lives as long as the pipeline.
   std::unique_ptr<QRhiTexture> layout_texture;
   std::unique_ptr<QRhiShaderResourceBindings> layout;
+  // A layer tile draws with empty_mask, and a mask tile with clear_image, so
+  // one shader draws both.
   std::unique_ptr<QRhiTexture> empty_mask;
+  std::unique_ptr<QRhiTexture> clear_image;
   std::unique_ptr<QRhiGraphicsPipeline> pipeline;
   std::unique_ptr<QRhiBuffer> vertices;
-  std::vector<Tile> tiles;
+  std::vector<QRect> rects;
+  // Bottom to top, as in the store.
+  std::vector<Layer> layers;
+  std::vector<Tile> mask_tiles;
   // Set by a frame that uploaded a whole image, for the frame after it.
   bool trim_pending = false;
 
@@ -108,6 +118,9 @@ struct Canvas::Gpu {
     layout_texture->create();
     empty_mask.reset(rhi->newTexture(QRhiTexture::R8, QSize(1, 1)));
     empty_mask->create();
+    // Mipmapped only to match the sampler; one pixel has one level.
+    clear_image.reset(rhi->newTexture(QRhiTexture::RGBA8, QSize(1, 1), 1, QRhiTexture::MipMapped));
+    clear_image->create();
     layout = bind(layout_texture.get(), empty_mask.get());
 
     pipeline.reset(rhi->newGraphicsPipeline());
@@ -135,29 +148,30 @@ struct Canvas::Gpu {
     pipeline->create();
   }
 
-  void createTiles(const TileStore& store, QRhiResourceUpdateBatch* updates) {
+  void createTiles(TileStore& store, QRhiResourceUpdateBatch* updates) {
     ZoneScoped;
-    tiles.clear();
+    layers.clear();
+    mask_tiles.clear();
     vertices.reset();
+    rects.clear();
     // A new texture's contents are undefined until the first upload.
     const std::array<quint8, 4> clear{};
     updates->uploadTexture(
         empty_mask.get(),
         QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(clear.data(), 1)));
+    updates->uploadTexture(
+        clear_image.get(),
+        QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(clear.data(), 4)));
     std::vector<float> data;
     for (std::size_t index = 0; index < store.tileCount(); ++index) {
-      Tile tile;
-      tile.rect = store.tileRect(index);
-      tile.texture.reset(
-          rhi->newTexture(QRhiTexture::RGBA8, tile.rect.size(), 1,
-                          QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
-      tile.texture->create();
-      tile.bindings = bind(tile.texture.get(), empty_mask.get());
-      appendQuad(data, tile.rect);
-      tiles.push_back(std::move(tile));
-      upload(store, index, updates);
-      uploadMask(store, index, updates);
+      rects.push_back(store.tileRect(index));
+      appendQuad(data, rects.back());
     }
+    mask_tiles.resize(rects.size());
+    for (std::size_t index = 0; index < rects.size(); ++index) {
+      uploadMask(store.tile(index, TileStore::Plane::Mask), index, updates);
+    }
+    syncLayers(store, updates);
     if (data.empty()) {
       return;
     }
@@ -165,6 +179,32 @@ struct Canvas::Gpu {
     vertices.reset(rhi->newBuffer(QRhiBuffer::Immutable, QRhiBuffer::VertexBuffer, bytes));
     vertices->create();
     updates->uploadStaticBuffer(vertices.get(), data.data());
+  }
+
+  // Matches the layers to the store's stack: keeps the textures of a layer it
+  // already has, wherever it moved, and uploads a new one whole. Then uploads
+  // each layer's dirty tiles.
+  void syncLayers(TileStore& store, QRhiResourceUpdateBatch* updates) {
+    std::vector<Layer> synced;
+    synced.reserve(store.layerCount());
+    for (std::size_t position = 0; position < store.layerCount(); ++position) {
+      const std::uint64_t id = store.layerId(position);
+      const auto found = std::ranges::find(layers, id, &Layer::id);
+      if (found != layers.end()) {
+        synced.push_back(std::move(*found));
+      } else {
+        synced.push_back({.id = id, .tiles = std::vector<Tile>(rects.size())});
+        std::ignore = store.takeLayerDirty(position);
+        for (std::size_t index = 0; index < rects.size(); ++index) {
+          upload(store.layerTile(position, index), synced.back().tiles.at(index), index, updates);
+        }
+        continue;
+      }
+      for (const std::size_t index : store.takeLayerDirty(position)) {
+        upload(store.layerTile(position, index), synced.back().tiles.at(index), index, updates);
+      }
+    }
+    layers = std::move(synced);
   }
 
   // The D3D11 driver copies each upload into staging memory in this process
@@ -185,34 +225,54 @@ struct Canvas::Gpu {
 #endif
   }
 
-  void upload(const TileStore& store, std::size_t index, QRhiResourceUpdateBatch* updates) {
-    QRhiTexture* texture = tiles.at(index).texture.get();
-    const QRhiTextureSubresourceUploadDescription source(store.tile(index));
-    updates->uploadTexture(texture, QRhiTextureUploadEntry(0, 0, source));
-    updates->generateMips(texture);
-  }
-
-  void uploadMask(const TileStore& store, std::size_t index, QRhiResourceUpdateBatch* updates) {
-    Tile& tile = tiles.at(index);
-    const QImage& mask = store.tile(index, TileStore::Plane::Mask);
-    if (mask.isNull()) {
-      if (tile.mask) {
-        tile.bindings = bind(tile.texture.get(), empty_mask.get());
-        tile.mask.reset();
-      }
+  void upload(const QImage& image, Tile& tile, std::size_t index,
+              QRhiResourceUpdateBatch* updates) {
+    if (image.isNull()) {
+      tile = {};
       return;
     }
-    if (!tile.mask) {
-      tile.mask.reset(rhi->newTexture(QRhiTexture::R8, tile.rect.size()));
-      tile.mask->create();
-      tile.bindings = bind(tile.texture.get(), tile.mask.get());
+    if (!tile.texture) {
+      tile.texture.reset(
+          rhi->newTexture(QRhiTexture::RGBA8, rects.at(index).size(), 1,
+                          QRhiTexture::MipMapped | QRhiTexture::UsedWithGenerateMips));
+      tile.texture->create();
+      tile.bindings = bind(tile.texture.get(), empty_mask.get());
+    }
+    updates->uploadTexture(
+        tile.texture.get(),
+        QRhiTextureUploadEntry(0, 0, QRhiTextureSubresourceUploadDescription(image)));
+    updates->generateMips(tile.texture.get());
+  }
+
+  void uploadMask(const QImage& image, std::size_t index, QRhiResourceUpdateBatch* updates) {
+    Tile& tile = mask_tiles.at(index);
+    if (image.isNull()) {
+      tile = {};
+      return;
+    }
+    if (!tile.texture) {
+      tile.texture.reset(rhi->newTexture(QRhiTexture::R8, rects.at(index).size()));
+      tile.texture->create();
+      tile.bindings = bind(clear_image.get(), tile.texture.get());
     }
     // Raw bytes with a stride, since QRhi reads a QImage as four bytes a pixel.
-    QRhiTextureSubresourceUploadDescription source(mask.constBits(),
-                                                   static_cast<quint32>(mask.sizeInBytes()));
-    source.setDataStride(static_cast<quint32>(mask.bytesPerLine()));
-    source.setSourceSize(mask.size());
-    updates->uploadTexture(tile.mask.get(), QRhiTextureUploadEntry(0, 0, source));
+    QRhiTextureSubresourceUploadDescription source(image.constBits(),
+                                                   static_cast<quint32>(image.sizeInBytes()));
+    source.setDataStride(static_cast<quint32>(image.bytesPerLine()));
+    source.setSourceSize(image.size());
+    updates->uploadTexture(tile.texture.get(), QRhiTextureUploadEntry(0, 0, source));
+  }
+
+  void draw(QRhiCommandBuffer* commands, const std::vector<Tile>& plane, QRectF visible) const {
+    quint32 first = 0;
+    for (std::size_t index = 0; index < plane.size(); ++index) {
+      const Tile& tile = plane.at(index);
+      if (tile.bindings && visible.intersects(rects.at(index))) {
+        commands->setShaderResources(tile.bindings.get());
+        commands->draw(kVerticesPerTile, 1, first);
+      }
+      first += kVerticesPerTile;
+    }
   }
 };
 
@@ -240,22 +300,20 @@ void Canvas::setBrush(const BrushSettings& brush) {
 }
 
 void Canvas::eraseMask() {
-  endStroke();
-  tiles_.clearMask();
-  update();
-  historyChanged();
+  edit(&TileStore::clearMask);
 }
 
 void Canvas::undo() {
-  endStroke();
-  tiles_.undo();
-  update();
-  historyChanged();
+  edit([](TileStore& tiles) { tiles.undo(); });
 }
 
 void Canvas::redo() {
+  edit([](TileStore& tiles) { tiles.redo(); });
+}
+
+void Canvas::edit(const std::function<void(TileStore&)>& change) {
   endStroke();
-  tiles_.redo();
+  change(tiles_);
   update();
   historyChanged();
 }
@@ -320,19 +378,16 @@ void Canvas::render(QRhiCommandBuffer* commands) {
   }
   QRhiResourceUpdateBatch* updates = rhi()->nextResourceUpdateBatch();
   if (image_changed_) {
-    gpu_->createTiles(tiles_, updates);
-    std::ignore = tiles_.takeDirty();
     std::ignore = tiles_.takeDirty(TileStore::Plane::Mask);
+    gpu_->createTiles(tiles_, updates);
     image_changed_ = false;
     gpu_->trim_pending = true;
     // Draws a second frame, even if nothing else changes, to trim in.
     update();
   } else {
-    for (const std::size_t index : tiles_.takeDirty()) {
-      gpu_->upload(tiles_, index, updates);
-    }
+    gpu_->syncLayers(tiles_, updates);
     for (const std::size_t index : tiles_.takeDirty(TileStore::Plane::Mask)) {
-      gpu_->uploadMask(tiles_, index, updates);
+      gpu_->uploadMask(tiles_.tile(index, TileStore::Plane::Mask), index, updates);
     }
   }
 
@@ -356,14 +411,12 @@ void Canvas::render(QRhiCommandBuffer* commands) {
     const QRhiCommandBuffer::VertexInput input(gpu_->vertices.get(), 0);
     commands->setVertexInput(0, 1, &input);
     const QRectF visible = view_.visibleImageRect();
-    quint32 first = 0;
-    for (const Gpu::Tile& tile : gpu_->tiles) {
-      if (visible.intersects(tile.rect)) {
-        commands->setShaderResources(tile.bindings.get());
-        commands->draw(kVerticesPerTile, 1, first);
+    for (std::size_t position = 0; position < gpu_->layers.size(); ++position) {
+      if (tiles_.layerVisible(position)) {
+        gpu_->draw(commands, gpu_->layers.at(position).tiles, visible);
       }
-      first += kVerticesPerTile;
     }
+    gpu_->draw(commands, gpu_->mask_tiles, visible);
   }
   commands->endPass();
 }

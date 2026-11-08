@@ -51,6 +51,10 @@ QToolBar#tools QToolButton:checked { background: %3; }
 QDockWidget::title { padding: 8px 10px; }
 QMainWindow::separator { background: %4; width: 1px; height: 1px; }
 QListWidget { border: none; }
+QListWidget::item { padding: 6px 4px; }
+QListWidget::indicator { width: 16px; height: 16px; }
+QListWidget::indicator:checked { image: url(:/icons/eye.svg); }
+QListWidget::indicator:unchecked { image: url(:/icons/eye-off.svg); }
 QSpinBox { border: 1px solid %2; border-radius: 4px; padding: 2px 4px; }
 )")
       .arg(kBar.name(), kHover.name(), kAccent.name(), kField.name());

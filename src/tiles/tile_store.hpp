@@ -4,27 +4,30 @@
 #include <QRect>
 #include <QSize>
 #include <QString>
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <vector>
 
 class QPainter;
 
 namespace pinsel {
 
-// The image as a grid of tiles, each a QImage of its own, with undo and redo.
-// Tiles count from the top left, row by row. An edit marks the tiles it touches
-// as dirty until takeDirty collects them, so the canvas uploads only those.
+// The image as a stack of layers over one grid of tiles, each tile a QImage of
+// its own, with undo and redo. Tiles count from the top left, row by row, and
+// layers from the bottom. An edit marks the tiles it touches as dirty until
+// takeDirty collects them, so the canvas uploads only those.
 //
-// Each tile has two planes: the image, and a mask that marks the region
-// inpainting may change. Both planes share one undo history. A mask tile stays
-// null, and costs nothing, until something paints on it.
+// Above the stack sits the mask, which marks the region inpainting may change.
+// Layer tiles, mask tiles and changes to the stack share one undo history. A
+// tile of a new layer, and a mask tile, stays null, and costs nothing, until
+// something paints on it.
 //
-// Undo keeps whole tiles from before each change. QImage shares its pixels
-// between copies until one of them is written, so keeping a tile costs nothing
-// until the edit detaches it.
+// Undo keeps whole tiles from before each change, and a change to the stack
+// keeps the whole stack from before it. QImage shares its pixels between copies
+// until one of them is written, so keeping a tile costs nothing until the edit
+// detaches it.
 class TileStore {
  public:
   static constexpr int kTileSize = 512;
@@ -34,30 +37,64 @@ class TileStore {
   static constexpr QImage::Format kMaskFormat = QImage::Format_Alpha8;
   static constexpr std::size_t kDefaultUndoBudget = std::size_t{1} << 30U;
 
+  // Image is the current layer.
   enum class Plane : std::uint8_t { Image, Mask };
 
   TileStore() = default;
-  // Converts image to kFormat. Every tile starts dirty. The store stays empty
-  // when there is no memory for the tiles. At its peak the store needs memory
-  // for the tiles and one more tile on top of image.
+  // One layer, converted to kFormat. Every tile starts dirty. The store stays
+  // empty when there is no memory for the tiles. At its peak the store needs
+  // memory for the tiles and one more tile on top of image.
   explicit TileStore(const QImage& image);
 
   [[nodiscard]] QSize size() const {
     return size_;
   }
   [[nodiscard]] std::size_t tileCount() const {
-    return planes_.at(planeIndex(Plane::Image)).size();
+    return tile_count_;
   }
   [[nodiscard]] QRect tileRect(std::size_t index) const;
-  // Null for a mask tile that nothing has painted.
-  [[nodiscard]] const QImage& tile(std::size_t index, Plane plane = Plane::Image) const {
-    return planes_.at(planeIndex(plane)).at(index);
-  }
+  // Null for a tile that nothing has painted.
+  [[nodiscard]] const QImage& tile(std::size_t index, Plane plane = Plane::Image) const;
+  // Image is the visible layers, one over the other.
   [[nodiscard]] QImage toImage(Plane plane = Plane::Image) const;
+
+  [[nodiscard]] std::size_t layerCount() const {
+    return layers_.size();
+  }
+  [[nodiscard]] std::size_t currentLayer() const {
+    return current_;
+  }
+  // Paint and Plane::Image go to the current layer. Choosing one is no edit.
+  void setCurrentLayer(std::size_t layer);
+  // Stays with the layer for its whole life, through moves, undo and redo.
+  [[nodiscard]] std::uint64_t layerId(std::size_t layer) const {
+    return layers_.at(layer).id;
+  }
+  [[nodiscard]] const QString& layerName(std::size_t layer) const {
+    return layers_.at(layer).name;
+  }
+  [[nodiscard]] bool layerVisible(std::size_t layer) const {
+    return layers_.at(layer).visible;
+  }
+  [[nodiscard]] const QImage& layerTile(std::size_t layer, std::size_t index) const {
+    return layers_.at(layer).tiles.at(index);
+  }
+  // Each change to the stack first commits the open step, then becomes an undo
+  // step of its own. Undo of one brings back the current layer from before it,
+  // and redo the one from after it.
+  //
+  // Puts an empty layer above the current one and makes it current.
+  void addLayer();
+  // Removes the current layer, unless it is the only one, and makes the one
+  // below current. Returns false when nothing was removed.
+  bool removeLayer();
+  // Moves the layer at from to position to and makes it current.
+  void moveLayer(std::size_t from, std::size_t to);
+  void setLayerVisible(std::size_t layer, bool visible);
 
   // Calls draw once for each tile under area, with the tile's index and a
   // painter in image pixels that is clipped to area and to the tile. A null
-  // mask tile becomes a clear one first. The change joins the open undo step.
+  // tile becomes a clear one first. The change joins the open undo step.
   void paint(QRect area, const std::function<void(QPainter&, std::size_t tile)>& draw,
              Plane plane = Plane::Image);
   // Empties the mask as an undo step of its own.
@@ -67,7 +104,8 @@ class TileStore {
   // undo keeps fit the budget, but always keeps the newest step.
   void commit();
   void setUndoBudget(std::size_t bytes);
-  // The pixels of the tiles of both planes, and of the tiles that undo keeps.
+  // The pixels of the tiles of every layer and the mask, and of the tiles that
+  // undo keeps.
   [[nodiscard]] std::size_t bytes() const;
   [[nodiscard]] std::size_t undoBytes() const;
   // Each first commits the open step. They return false when there is no step.
@@ -75,44 +113,69 @@ class TileStore {
   bool redo();
   [[nodiscard]] bool canUndo() const;
   [[nodiscard]] bool canRedo() const;
-  // Names the edits behind the current pixels of both planes: undo and redo
-  // return to an earlier number, and each paint call, even one that joins the
-  // open step, gives a number never seen before. A save stores it to tell later whether
+  // Names the edits behind the current layers and mask: undo and redo return to
+  // an earlier number, and each paint call, even one that joins the open step,
+  // gives a number never seen before. A save stores it to tell later whether
   // anything changed.
   [[nodiscard]] std::uint64_t revision() const;
 
   // The plane's dirty tiles in ascending order. They are clean afterwards.
   [[nodiscard]] std::vector<std::size_t> takeDirty(Plane plane = Plane::Image);
+  [[nodiscard]] std::vector<std::size_t> takeLayerDirty(std::size_t layer);
 
  private:
-  static constexpr std::size_t kPlanes = 2;
-  template <typename T>
-  using PerPlane = std::array<std::vector<T>, kPlanes>;
+  static constexpr std::uint64_t kMaskId = 0;
 
+  struct Layer {
+    std::uint64_t id = kMaskId;
+    QString name;
+    bool visible = true;
+    std::vector<QImage> tiles;
+    std::vector<bool> dirty;
+    // Which tiles the open step already saved.
+    std::vector<bool> saved;
+  };
   struct SavedTile {
-    Plane plane;
+    std::uint64_t layer;
     std::size_t index;
     QImage image;
+  };
+  struct Stack {
+    std::vector<Layer> layers;
+    std::size_t current = 0;
   };
   struct Step {
     // The revision of the step's latest paint.
     std::uint64_t revision = 0;
     std::vector<SavedTile> tiles;
+    // The stack before a change to it, and the bytes of the layers it holds
+    // that the stack after the change has lost.
+    std::optional<Stack> stack;
+    std::size_t stack_bytes = 0;
   };
 
-  static std::size_t planeIndex(Plane plane) {
-    return static_cast<std::size_t>(plane);
-  }
-  void save(Plane plane, std::size_t index);
+  [[nodiscard]] Layer emptyLayer() const;
+  [[nodiscard]] static std::size_t layerBytes(const Layer& layer);
+  [[nodiscard]] std::size_t lostBytes(const std::vector<Layer>& layers) const;
+  static std::vector<std::size_t> takeFlags(std::vector<bool>& flags);
+  Layer& target(Plane plane);
+  [[nodiscard]] const Layer& target(Plane plane) const;
+  Layer* find(std::uint64_t id);
+  void save(Layer& layer, std::size_t index);
+  void restack(const std::function<void()>& change);
   void swapIn(Step& step);
+  // Returns the bytes of the layers the stack it gives back has lost.
+  std::size_t swapStack(Stack& stack);
+  void pushStep(Step step);
   void trimUndo();
 
   QSize size_;
   std::size_t columns_ = 0;
-  PerPlane<QImage> planes_;
-  PerPlane<bool> dirty_;
-  // Which tiles the open step already saved.
-  PerPlane<bool> saved_;
+  std::size_t tile_count_ = 0;
+  std::vector<Layer> layers_;
+  std::size_t current_ = 0;
+  Layer mask_;
+  std::uint64_t last_layer_id_ = kMaskId;
   Step open_;
   // The revision before the oldest step in undo_.
   std::uint64_t base_revision_ = 0;

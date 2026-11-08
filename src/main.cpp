@@ -27,7 +27,11 @@ int main(int argc, char** argv) {
   const QCommandLineOption blank(QStringLiteral("new"),
                                  QStringLiteral("Start a blank white image, as WIDTHxHEIGHT."),
                                  QStringLiteral("size"));
+  const QCommandLineOption layers(QStringLiteral("layers"),
+                                  QStringLiteral("Add this many empty layers to the image."),
+                                  QStringLiteral("count"));
   parser.addOption(screenshot);
+  parser.addOption(layers);
   parser.addOption(open);
   parser.addOption(blank);
   parser.addOption(size);
@@ -50,6 +54,8 @@ int main(int argc, char** argv) {
     qCritical("Not enough memory for the new image");
     return 1;
   }
+  const int layer_count = parser.value(layers).toInt();
+  window.addLayers(layer_count);
   if (parser.isSet(screenshot)) {
     // Lays the window out at any size, unclipped by the screen, and never shows it.
     window.setAttribute(Qt::WA_DontShowOnScreen);
@@ -60,6 +66,7 @@ int main(int argc, char** argv) {
   };
   if (parser.isSet(open)) {
     window.openImage(parser.value(open), [&](const QString& error) {
+      window.addLayers(layer_count);
       if (!error.isEmpty()) {
         qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
         QApplication::exit(1);
