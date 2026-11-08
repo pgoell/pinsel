@@ -27,7 +27,7 @@ constexpr QLatin1StringView kNoMemory("Not enough memory for the image");
 constexpr int kThumbnailSize = 256;
 
 struct CompositeOp {
-  BlendMode mode;
+  BlendMode mode = BlendMode::Normal;
   QLatin1StringView name;
 };
 constexpr std::array kCompositeOps{
@@ -38,15 +38,22 @@ constexpr std::array kCompositeOps{
 };
 
 QLatin1StringView compositeOpName(BlendMode mode) {
-  const auto* const found = std::ranges::find(kCompositeOps, mode, &CompositeOp::mode);
-  return found->name;
+  for (const CompositeOp& op : kCompositeOps) {
+    if (op.mode == mode) {
+      return op.name;
+    }
+  }
+  return kCompositeOps.front().name;
 }
 
 // An operation pinsel has no mode for, such as svg:darken, draws as Normal.
 BlendMode blendModeOf(QStringView name) {
-  const auto* const found = std::ranges::find_if(
-      kCompositeOps, [name](const CompositeOp& op) { return op.name == name; });
-  return found == kCompositeOps.end() ? BlendMode::Normal : found->mode;
+  for (const CompositeOp& op : kCompositeOps) {
+    if (op.name == name) {
+      return op.mode;
+    }
+  }
+  return BlendMode::Normal;
 }
 
 // A zip in a file that only replaces the old file once everything is in.

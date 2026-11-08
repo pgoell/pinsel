@@ -86,9 +86,12 @@ constexpr std::array kSaveFormats{
 };
 
 const SaveFormat& saveFormatOf(const QString& filter) {
-  const auto* const found = std::ranges::find_if(
-      kSaveFormats, [&filter](const SaveFormat& format) { return format.filter == filter; });
-  return found == kSaveFormats.end() ? kSaveFormats.front() : *found;
+  for (const SaveFormat& format : kSaveFormats) {
+    if (format.filter == filter) {
+      return format;
+    }
+  }
+  return kSaveFormats.front();
 }
 
 }  // namespace
