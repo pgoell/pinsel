@@ -94,8 +94,13 @@ class DiffusersEngine:
         request = job.request
         steps = int(request.get("steps", 30))
         strength = float(request.get("strength", 1.0))
-        # diffusers runs only the last steps * strength of the schedule.
-        total = max(1, min(steps, int(steps * strength)))
+        if not 0 < strength <= 1:
+            raise ValueError(f"strength {strength} is not in (0, 1]")
+        # diffusers runs only the last int(steps * strength) steps of the
+        # schedule, and refuses to run none.
+        while int(steps * strength) < 1:
+            steps += 1
+        total = min(steps, int(steps * strength))
         with Image.open(request["image"]) as file:
             image = file.convert("RGB")
         with Image.open(request["mask"]) as file:
