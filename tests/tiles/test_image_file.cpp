@@ -166,8 +166,8 @@ TEST_F(ImageFile, OpenRasterStoresTheMimetypeFirstAndUncompressed) {
   EXPECT_FALSE(zip.read(QStringLiteral("data/mask.png"), kAnySize).has_value());
 }
 
-// Another editor's file: deflated entries, a group, layer offsets, and a mode
-// pinsel lacks.
+// Another editor's file: deflated entries, groups, layer offsets, a mode
+// pinsel lacks, and values out of range.
 QString writeOtherEditorsFile(const QString& path) {
   QFile file(path);
   if (!file.open(QIODevice::WriteOnly)) {
@@ -179,7 +179,9 @@ QString writeOtherEditorsFile(const QString& path) {
       zip.add(QStringLiteral("stack.xml"), R"(<?xml version="1.0"?>
 <image version="0.0.3" w="600" h="400">
   <stack>
-    <layer name="Odd" src="data/base.png" opacity="nan" visibility="hidden"/>
+    <stack x="2147483647">
+      <layer name="Odd" src="data/base.png" opacity="nan" visibility="hidden" x="1"/>
+    </stack>
     <stack name="Group" opacity="0.5" visibility="hidden" x="100" y="0">
       <layer name="Inner" src="data/inner.png" x="10" y="20" composite-op="svg:darken"/>
     </stack>
@@ -205,6 +207,7 @@ TEST_F(ImageFile, OpenRasterGroupsMeltIntoTheirLayers) {
             std::tuple(QStringLiteral("Inner"), false, 0.5, BlendMode::Normal));
   EXPECT_EQ(attributesOf(read.tiles, 2),
             std::tuple(QStringLiteral("Odd"), false, 1.0, BlendMode::Normal));
+  EXPECT_EQ(read.tiles.currentLayer(), 2);
 }
 
 TEST_F(ImageFile, OpenRasterLayersSitAtTheirOffsetsCutToTheImage) {
@@ -298,6 +301,11 @@ TEST_F(ImageFile, APngNamedOraIsNoOpenRasterFile) {
 
   EXPECT_NE(read.error, QString());
   EXPECT_TRUE(read.tiles.size().isEmpty());
+}
+
+TEST_F(ImageFile, WritingATypePinselCannotWriteSaysWhy) {
+  EXPECT_NE(pinsel::writeImage(cleanStore(), path(QStringLiteral("photo.jpg"))), QString());
+  EXPECT_FALSE(QFile::exists(path(QStringLiteral("photo.jpg"))));
 }
 
 TEST_F(ImageFile, WritingToAMissingFolderSaysWhy) {

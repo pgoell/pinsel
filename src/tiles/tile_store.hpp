@@ -257,6 +257,7 @@ struct ImageFormat {
   // A name filter for a file dialog.
   QLatin1StringView filter;
   // Keeps the layers and the mask, rather than merging the visible layers.
+  // OpenRaster is the one such format.
   bool layered = false;
 };
 inline constexpr std::array kImageFormats{

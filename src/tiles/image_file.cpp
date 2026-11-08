@@ -11,10 +11,6 @@ namespace pinsel {
 
 namespace {
 
-bool isOpenRaster(const QString& path) {
-  return path.endsWith(QStringLiteral(".ora"), Qt::CaseInsensitive);
-}
-
 QString writePng(const QImage& image, const QString& path) {
   QSaveFile file(path);
   if (!file.open(QIODevice::WriteOnly)) {
@@ -34,7 +30,8 @@ QString writePng(const QImage& image, const QString& path) {
 }  // namespace
 
 ReadImage readImage(const QString& path) {
-  if (isOpenRaster(path)) {
+  const std::optional<ImageFormat> format = imageFormatOf(path);
+  if (format && format->layered) {
     return readOpenRaster(path);
   }
   QImageReader reader(path);
@@ -60,7 +57,11 @@ std::optional<ImageFormat> imageFormatOf(const QString& path) {
 }
 
 QString writeImage(const TileStore& tiles, const QString& path) {
-  if (isOpenRaster(path)) {
+  const std::optional<ImageFormat> format = imageFormatOf(path);
+  if (!format) {
+    return QStringLiteral("pinsel cannot write this type of file");
+  }
+  if (format->layered) {
     return writeOpenRaster(tiles, path);
   }
   const QImage image = tiles.toImage();

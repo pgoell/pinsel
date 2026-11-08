@@ -244,6 +244,14 @@ struct Group {
   QPoint offset;
 };
 
+// An offset past any side pinsel opens moves a layer out of sight, so clamping
+// there changes nothing visible and keeps the sums of nested offsets in an int.
+constexpr std::int64_t kMaxOffset = 65535;
+
+int offsetBy(int outer, QStringView value) {
+  return static_cast<int>(std::clamp(std::int64_t{outer} + value.toInt(), -kMaxOffset, kMaxOffset));
+}
+
 Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
   bool has_opacity = false;
   const double opacity = attributes.value(QStringLiteral("opacity")).toDouble(&has_opacity);
@@ -251,8 +259,8 @@ Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
       .visible = outer.visible && attributes.value(QStringLiteral("visibility")) != u"hidden",
       .opacity = outer.opacity *
                  (has_opacity && std::isfinite(opacity) ? std::clamp(opacity, 0.0, 1.0) : 1.0),
-      .offset = outer.offset + QPoint(attributes.value(QStringLiteral("x")).toInt(),
-                                      attributes.value(QStringLiteral("y")).toInt()),
+      .offset = QPoint(offsetBy(outer.offset.x(), attributes.value(QStringLiteral("x"))),
+                       offsetBy(outer.offset.y(), attributes.value(QStringLiteral("y")))),
   };
 }
 
@@ -311,13 +319,16 @@ struct Stack {
 constexpr std::uint32_t kMaxStackXmlBytes = 16U * 1024U * 1024U;
 
 // A PNG is never much larger than its raw pixels, so a layer file gets the
-// pixel budget that Qt's image readers allow.
+// pixel budget that Qt's image readers allow. Noise does not compress, and then
+// PNG adds a filter byte a row and deflate and chunk headers on top, so the cap
+// leaves room for those.
 std::uint32_t maxPngBytes() {
   constexpr std::int64_t kMiB = std::int64_t{1024} * 1024;
   const std::int64_t limit = QImageReader::allocationLimit();
-  return limit <= 0 || limit * kMiB >= std::numeric_limits<std::uint32_t>::max()
+  const std::int64_t budget = (limit * kMiB) + (limit * kMiB / 64) + kMiB;
+  return limit <= 0 || std::cmp_greater_equal(budget, std::numeric_limits<std::uint32_t>::max())
              ? std::numeric_limits<std::uint32_t>::max()
-             : static_cast<std::uint32_t>(limit * kMiB);
+             : static_cast<std::uint32_t>(budget);
 }
 
 // stack.xml can name any size, so it gets the same pixel budget that Qt's
