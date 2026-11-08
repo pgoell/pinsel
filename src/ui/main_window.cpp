@@ -70,28 +70,22 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
-struct SaveFormat {
-  QLatin1StringView filter;
-  QLatin1StringView suffix;
-};
-constexpr std::array kSaveFormats{
-    SaveFormat{
-        .filter = QLatin1StringView("PNG image (*.png)"),
-        .suffix = QLatin1StringView("png"),
-    },
-    SaveFormat{
-        .filter = QLatin1StringView("OpenRaster image, with layers and mask (*.ora)"),
-        .suffix = QLatin1StringView("ora"),
-    },
-};
-
-const SaveFormat& saveFormatOf(const QString& filter) {
-  for (const SaveFormat& format : kSaveFormats) {
+ImageFormat formatOfFilter(const QString& filter) {
+  for (const ImageFormat& format : kImageFormats) {
     if (format.filter == filter) {
       return format;
     }
   }
-  return kSaveFormats.front();
+  return kImageFormats.front();
+}
+
+ImageFormat firstFormat(bool layered) {
+  for (const ImageFormat& format : kImageFormats) {
+    if (format.layered == layered) {
+      return format;
+    }
+  }
+  return kImageFormats.front();
 }
 
 }  // namespace
@@ -247,7 +241,7 @@ void MainWindow::whenChangesAreSafe(const std::function<void()>& proceed) {
 
 void MainWindow::save(const std::function<void(bool saved)>& done) {
   // Save never writes into a file of a type pinsel cannot write, such as JPEG.
-  if (canWrite(path_)) {
+  if (imageFormatOf(path_)) {
     saveTo(path_, done);
   } else {
     saveAs(done);
@@ -259,15 +253,15 @@ void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
   // OpenRaster.
   const TileStore& tiles = canvas_->tiles();
   const QFileInfo current(path_);
-  const bool layered = tiles.layerCount() > 1 || tiles.hasMask() ||
-                       current.suffix().compare(QStringLiteral("ora"), Qt::CaseInsensitive) == 0;
-  const SaveFormat& format = kSaveFormats.at(layered ? 1 : 0);
+  const std::optional<ImageFormat> current_format = imageFormatOf(path_);
+  const ImageFormat format = firstFormat(tiles.layerCount() > 1 || tiles.hasMask() ||
+                                         (current_format && current_format->layered));
   const QString base =
       path_.isEmpty() ? QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
                             .filePath(QStringLiteral("Untitled"))
                       : current.dir().filePath(current.completeBaseName());
   QStringList filters;
-  for (const SaveFormat& each : kSaveFormats) {
+  for (const ImageFormat& each : kImageFormats) {
     filters.append(QString(each.filter));
   }
   QFileDialog dialog(this, QStringLiteral("Save Image"), base + u'.' + format.suffix);
@@ -278,17 +272,17 @@ void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
   // the file that will be written.
   dialog.setDefaultSuffix(QString(format.suffix));
   connect(&dialog, &QFileDialog::filterSelected, &dialog, [&dialog](const QString& filter) {
-    dialog.setDefaultSuffix(QString(saveFormatOf(filter).suffix));
+    dialog.setDefaultSuffix(QString(formatOfFilter(filter).suffix));
   });
   if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
     done(false);
     return;
   }
   QString path = dialog.selectedFiles().constFirst();
-  if (!canWrite(path)) {
+  if (!imageFormatOf(path)) {
     // A name with another suffix, such as photo.jpg, gets the chosen type's
     // suffix on top, which the dialog never checked.
-    path += u'.' + saveFormatOf(dialog.selectedNameFilter()).suffix;
+    path += u'.' + formatOfFilter(dialog.selectedNameFilter()).suffix;
     if (QFileInfo::exists(path) &&
         QMessageBox::question(
             this, QStringLiteral("Save Image"),
@@ -379,7 +373,10 @@ void MainWindow::askAndOpen() {
   for (const QByteArray& format : QImageReader::supportedImageFormats()) {
     patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
   }
-  patterns.append(QStringLiteral("*.ora"));
+  for (const ImageFormat& format : kImageFormats) {
+    patterns.append(QStringLiteral("*.") + format.suffix);
+  }
+  patterns.removeDuplicates();
   const QString path = QFileDialog::getOpenFileName(
       this, QStringLiteral("Open Image"), QString(),
       QStringLiteral("Images (%1)").arg(patterns.join(QLatin1Char(' '))));

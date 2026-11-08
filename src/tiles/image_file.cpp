@@ -1,6 +1,7 @@
 #include <QImageReader>
 #include <QImageWriter>
 #include <QSaveFile>
+#include <optional>
 #include <utility>
 
 #include "tiles/openraster.hpp"
@@ -12,10 +13,6 @@ namespace {
 
 bool isOpenRaster(const QString& path) {
   return path.endsWith(QStringLiteral(".ora"), Qt::CaseInsensitive);
-}
-
-bool isPng(const QString& path) {
-  return path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
 }
 
 QString writePng(const QImage& image, const QString& path) {
@@ -53,8 +50,13 @@ ReadImage readImage(const QString& path) {
   return {.tiles = std::move(tiles), .error = {}};
 }
 
-bool canWrite(const QString& path) {
-  return isPng(path) || isOpenRaster(path);
+std::optional<ImageFormat> imageFormatOf(const QString& path) {
+  for (const ImageFormat& format : kImageFormats) {
+    if (path.endsWith(u'.' + format.suffix, Qt::CaseInsensitive)) {
+      return format;
+    }
+  }
+  return std::nullopt;
 }
 
 QString writeImage(const TileStore& tiles, const QString& path) {

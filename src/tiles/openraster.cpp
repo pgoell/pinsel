@@ -9,6 +9,7 @@
 #include <QXmlStreamWriter>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -248,7 +249,8 @@ Group groupOf(const QXmlStreamAttributes& attributes, const Group& outer) {
   const double opacity = attributes.value(QStringLiteral("opacity")).toDouble(&has_opacity);
   return {
       .visible = outer.visible && attributes.value(QStringLiteral("visibility")) != u"hidden",
-      .opacity = outer.opacity * (has_opacity ? std::clamp(opacity, 0.0, 1.0) : 1.0),
+      .opacity = outer.opacity *
+                 (has_opacity && std::isfinite(opacity) ? std::clamp(opacity, 0.0, 1.0) : 1.0),
       .offset = outer.offset + QPoint(attributes.value(QStringLiteral("x")).toInt(),
                                       attributes.value(QStringLiteral("y")).toInt()),
   };

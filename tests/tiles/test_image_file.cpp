@@ -179,6 +179,7 @@ QString writeOtherEditorsFile(const QString& path) {
       zip.add(QStringLiteral("stack.xml"), R"(<?xml version="1.0"?>
 <image version="0.0.3" w="600" h="400">
   <stack>
+    <layer name="Odd" src="data/base.png" opacity="nan" visibility="hidden"/>
     <stack name="Group" opacity="0.5" visibility="hidden" x="100" y="0">
       <layer name="Inner" src="data/inner.png" x="10" y="20" composite-op="svg:darken"/>
     </stack>
@@ -197,12 +198,13 @@ TEST_F(ImageFile, OpenRasterGroupsMeltIntoTheirLayers) {
 
   const pinsel::ReadImage read = pinsel::readImage(path(QStringLiteral("other.ora")));
 
-  ASSERT_EQ(read.tiles.layerCount(), 2);
+  ASSERT_EQ(read.tiles.layerCount(), 3);
   EXPECT_EQ(attributesOf(read.tiles, 0),
             std::tuple(QStringLiteral("Base"), true, 0.75, BlendMode::Screen));
   EXPECT_EQ(attributesOf(read.tiles, 1),
             std::tuple(QStringLiteral("Inner"), false, 0.5, BlendMode::Normal));
-  EXPECT_EQ(read.tiles.currentLayer(), 1);
+  EXPECT_EQ(attributesOf(read.tiles, 2),
+            std::tuple(QStringLiteral("Odd"), false, 1.0, BlendMode::Normal));
 }
 
 TEST_F(ImageFile, OpenRasterLayersSitAtTheirOffsetsCutToTheImage) {
@@ -210,7 +212,7 @@ TEST_F(ImageFile, OpenRasterLayersSitAtTheirOffsetsCutToTheImage) {
 
   const pinsel::ReadImage read = pinsel::readImage(path(QStringLiteral("other.ora")));
 
-  ASSERT_EQ(read.tiles.layerCount(), 2);
+  ASSERT_EQ(read.tiles.layerCount(), 3);
   const TileStore::LayerContent inner = contentOf(read.tiles, 1);
   const QImage cut = inner.image.copy(QRect(-inner.offset, QSize(600, 400)));
   EXPECT_EQ(cut.pixelColor(109, 20), QColor(Qt::transparent));
@@ -318,10 +320,12 @@ TEST_F(ImageFile, AZipEntryPastItsCapIsNotRead) {
 }
 
 TEST(ImageFileNames, OnlyPngAndOpenRasterAreWritable) {
-  EXPECT_TRUE(pinsel::canWrite(QStringLiteral("a.PNG")));
-  EXPECT_TRUE(pinsel::canWrite(QStringLiteral("a.ora")));
-  EXPECT_FALSE(pinsel::canWrite(QStringLiteral("a.jpg")));
-  EXPECT_FALSE(pinsel::canWrite(QString()));
+  EXPECT_EQ(pinsel::imageFormatOf(QStringLiteral("a.PNG")).value_or(pinsel::ImageFormat{}).suffix,
+            QLatin1StringView("png"));
+  EXPECT_TRUE(
+      pinsel::imageFormatOf(QStringLiteral("a.ora")).value_or(pinsel::ImageFormat{}).layered);
+  EXPECT_FALSE(pinsel::imageFormatOf(QStringLiteral("a.jpg")).has_value());
+  EXPECT_FALSE(pinsel::imageFormatOf(QStringLiteral("ora")).has_value());
 }
 
 TEST(ImageFileNames, ReadingAMissingFileSaysWhyAndLeavesTheStoreEmpty) {

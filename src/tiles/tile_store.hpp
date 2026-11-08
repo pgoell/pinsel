@@ -5,6 +5,7 @@
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -250,8 +251,29 @@ struct ReadImage {
 // large image, so callers run it off the UI thread.
 ReadImage readImage(const QString& path);
 
-// Whether writeImage can write a file of the type that path names.
-bool canWrite(const QString& path);
+// A type of file that writeImage writes.
+struct ImageFormat {
+  QLatin1StringView suffix;
+  // A name filter for a file dialog.
+  QLatin1StringView filter;
+  // Keeps the layers and the mask, rather than merging the visible layers.
+  bool layered = false;
+};
+inline constexpr std::array kImageFormats{
+    ImageFormat{
+        .suffix = QLatin1StringView("png"),
+        .filter = QLatin1StringView("PNG image (*.png)"),
+        .layered = false,
+    },
+    ImageFormat{
+        .suffix = QLatin1StringView("ora"),
+        .filter = QLatin1StringView("OpenRaster image, with layers and mask (*.ora)"),
+        .layered = true,
+    },
+};
+
+// The format that the suffix of path names, if writeImage writes it.
+std::optional<ImageFormat> imageFormatOf(const QString& path);
 
 // Writes tiles at path, through a temporary file, so a failed write leaves the
 // old file whole: an OpenRaster file (.ora) keeps the layers and the mask, and
