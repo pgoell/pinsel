@@ -10,6 +10,8 @@
 #include <QString>
 #include <QTemporaryDir>
 #include <cstddef>
+#include <cstdint>
+#include <limits>
 #include <optional>
 #include <tuple>
 #include <vector>
@@ -23,6 +25,7 @@ using pinsel::TileStore;
 using BlendMode = TileStore::BlendMode;
 
 constexpr int kTile = TileStore::kTileSize;
+constexpr std::uint32_t kAnySize = std::numeric_limits<std::uint32_t>::max();
 
 QImage filled(QSize size, QColor color) {
   QImage image(size, TileStore::kFormat);
@@ -156,11 +159,11 @@ TEST_F(ImageFile, OpenRasterStoresTheMimetypeFirstAndUncompressed) {
   EXPECT_TRUE(start.startsWith("PK\x03\x04"));
   EXPECT_EQ(start.mid(30), QByteArray("mimetypeimage/openraster"));
   const pinsel::ZipReader zip(path(QStringLiteral("plain.ora")));
-  EXPECT_TRUE(zip.read(QStringLiteral("mergedimage.png")).has_value());
-  const QImage thumbnail =
-      QImage::fromData(zip.read(QStringLiteral("Thumbnails/thumbnail.png")).value_or(QByteArray()));
+  EXPECT_TRUE(zip.read(QStringLiteral("mergedimage.png"), kAnySize).has_value());
+  const QImage thumbnail = QImage::fromData(
+      zip.read(QStringLiteral("Thumbnails/thumbnail.png"), kAnySize).value_or(QByteArray()));
   EXPECT_EQ(thumbnail.width(), 256);
-  EXPECT_FALSE(zip.read(QStringLiteral("data/mask.png")).has_value());
+  EXPECT_FALSE(zip.read(QStringLiteral("data/mask.png"), kAnySize).has_value());
 }
 
 // Another editor's file: deflated entries, a group, layer offsets, and a mode
@@ -298,6 +301,20 @@ TEST_F(ImageFile, APngNamedOraIsNoOpenRasterFile) {
 TEST_F(ImageFile, WritingToAMissingFolderSaysWhy) {
   EXPECT_NE(pinsel::writeImage(cleanStore(), path(QStringLiteral("missing/out.png"))), QString());
   EXPECT_NE(pinsel::writeImage(cleanStore(), path(QStringLiteral("missing/out.ora"))), QString());
+}
+
+TEST_F(ImageFile, AZipEntryPastItsCapIsNotRead) {
+  {
+    QFile file(path(QStringLiteral("big.zip")));
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly));
+    pinsel::ZipWriter zip(file);
+    ASSERT_TRUE(zip.add(QStringLiteral("zeros"), QByteArray(1000, '\0'), true));
+    ASSERT_TRUE(zip.finish());
+  }
+  const pinsel::ZipReader zip(path(QStringLiteral("big.zip")));
+
+  EXPECT_FALSE(zip.read(QStringLiteral("zeros"), 999).has_value());
+  EXPECT_EQ(zip.read(QStringLiteral("zeros"), 1000).value_or(QByteArray()), QByteArray(1000, '\0'));
 }
 
 TEST(ImageFileNames, OnlyPngAndOpenRasterAreWritable) {

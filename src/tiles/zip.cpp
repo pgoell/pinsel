@@ -28,6 +28,9 @@ constexpr std::uint16_t kUtf8Names = 0x0800;
 // 1 January 1980 in MS-DOS date format, the earliest date a zip can hold. A
 // fixed date makes the same image give the same file.
 constexpr std::uint16_t kDate = (1U << 5U) | 1U;
+// Deflate never shrinks data by more than this, so a larger claimed size is a
+// lie. https://zlib.net/zlib_tech.html
+constexpr std::uint64_t kMaxDeflateRatio = 1032;
 constexpr std::uint64_t kMax32 = std::numeric_limits<std::uint32_t>::max();
 constexpr std::uint64_t kMax16 = std::numeric_limits<std::uint16_t>::max();
 
@@ -257,9 +260,10 @@ QString ZipReader::firstName() const {
   return first == entries_.end() ? QString() : first->name;
 }
 
-std::optional<QByteArray> ZipReader::read(const QString& name) const {
+std::optional<QByteArray> ZipReader::read(const QString& name, std::uint32_t max_size) const {
   const auto found = std::ranges::find(entries_, name, &Entry::name);
-  if (found == entries_.end() || (found->flags & kEncrypted) != 0) {
+  if (found == entries_.end() || (found->flags & kEncrypted) != 0 || found->size > max_size ||
+      std::uint64_t{found->size} > (std::uint64_t{found->packed_size} * kMaxDeflateRatio) + 1024) {
     return std::nullopt;
   }
   const qsizetype header = found->offset;

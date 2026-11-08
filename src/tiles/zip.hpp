@@ -55,8 +55,10 @@ class ZipReader {
   }
   // The name of the entry the archive stores first.
   [[nodiscard]] QString firstName() const;
-  // Null when there is no such entry, or it is broken.
-  [[nodiscard]] std::optional<QByteArray> read(const QString& name) const;
+  // Null when there is no such entry, it is broken, or it would inflate past
+  // max_size bytes. The size an entry claims comes from the file, so the cap
+  // keeps a crafted archive from taking all memory.
+  [[nodiscard]] std::optional<QByteArray> read(const QString& name, std::uint32_t max_size) const;
 
  private:
   struct Entry {

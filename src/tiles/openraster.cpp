@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -304,6 +305,19 @@ struct Stack {
   QString error;
 };
 
+// Real files list a few hundred layers at most, in far less.
+constexpr std::uint32_t kMaxStackXmlBytes = 16U * 1024U * 1024U;
+
+// A PNG is never much larger than its raw pixels, so a layer file gets the
+// pixel budget that Qt's image readers allow.
+std::uint32_t maxPngBytes() {
+  constexpr std::int64_t kMiB = std::int64_t{1024} * 1024;
+  const std::int64_t limit = QImageReader::allocationLimit();
+  return limit <= 0 || limit * kMiB >= std::numeric_limits<std::uint32_t>::max()
+             ? std::numeric_limits<std::uint32_t>::max()
+             : static_cast<std::uint32_t>(limit * kMiB);
+}
+
 // stack.xml can name any size, so it gets the same pixel budget that Qt's
 // image readers give a PNG's header.
 bool opensAtSize(QSize size) {
@@ -353,7 +367,7 @@ class LayerFiles {
   explicit LayerFiles(const ZipReader& zip) : zip_(&zip) {}
 
   QImage read(const QString& src) {
-    const std::optional<QByteArray> data = zip_->read(src);
+    const std::optional<QByteArray> data = zip_->read(src, maxPngBytes());
     QImage image = data ? QImage::fromData(*data) : QImage();
     if (image.isNull() && error_.isEmpty()) {
       error_ = QStringLiteral("Could not read %1").arg(src);
@@ -407,12 +421,12 @@ ReadImage readOpenRaster(const QString& path) {
     return failed(zip.error());
   }
   if (zip.firstName() != u"mimetype" ||
-      zip.read(QStringLiteral("mimetype")).value_or(QByteArray()) != kMimeType) {
+      zip.read(QStringLiteral("mimetype"), kMimeType.size()).value_or(QByteArray()) != kMimeType) {
     return failed(QStringLiteral("Not an OpenRaster file"));
   }
-  const std::optional<QByteArray> xml = zip.read(QStringLiteral("stack.xml"));
+  const std::optional<QByteArray> xml = zip.read(QStringLiteral("stack.xml"), kMaxStackXmlBytes);
   if (!xml) {
-    return failed(QStringLiteral("The file has no stack.xml"));
+    return failed(QStringLiteral("Could not read stack.xml"));
   }
   Stack stack = readStackXml(*xml);
   if (!stack.error.isEmpty()) {
