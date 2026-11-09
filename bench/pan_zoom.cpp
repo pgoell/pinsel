@@ -6,6 +6,7 @@
 #include <QLinearGradient>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QRect>
 #include <QWheelEvent>
 #include <algorithm>
 #include <chrono>
@@ -14,6 +15,7 @@
 #include <functional>
 #include <numeric>
 #include <tracy/Tracy.hpp>
+#include <utility>
 #include <vector>
 
 #ifdef _WIN32
@@ -24,7 +26,6 @@
 #include <fstream>
 #include <string>
 #include <string_view>
-#include <utility>
 #endif
 
 #include "canvas/canvas.hpp"
@@ -163,6 +164,39 @@ void BM_Pan(benchmark::State& state) {
   sendMouse(canvas, QEvent::MouseButtonRelease, centre, Qt::MiddleButton, Qt::NoButton);
 }
 BENCHMARK(BM_Pan)->UseManualTime()->Unit(benchmark::kMillisecond);
+
+// Pans over the 4K image with four more 4K layers, one in each blend mode, so
+// every frame composites off screen.
+void BM_PanBlendedLayers(benchmark::State& state) {
+  pinsel::Canvas canvas;
+  setUp(canvas);
+  using Mode = pinsel::TileStore::BlendMode;
+  canvas.edit([](pinsel::TileStore& tiles) {
+    const QRect whole(QPoint(), tiles.size());
+    for (const auto& [mode, color] : {
+             std::pair{Mode::Multiply, QColor(250, 200, 120)},
+             {Mode::Screen, QColor(20, 40, 90)},
+             {Mode::Overlay, QColor(90, 160, 60)},
+             {Mode::Normal, QColor(255, 255, 255, 40)},
+         }) {
+      tiles.addLayer();
+      tiles.paint(whole,
+                  [&](QPainter& painter, std::size_t /*tile*/) { painter.fillRect(whole, color); });
+      tiles.setLayerBlendMode(tiles.currentLayer(), mode);
+      tiles.setLayerOpacity(tiles.currentLayer(), 0.7);
+    }
+    tiles.commit();
+  });
+  const QPointF centre(kViewport.width() / 2.0, kViewport.height() / 2.0);
+  sendMouse(canvas, QEvent::MouseButtonPress, centre, Qt::MiddleButton, Qt::MiddleButton);
+  measureFrames(state, canvas, [&](std::size_t frame) {
+    const double angle = static_cast<double>(frame) * 0.05;
+    const QPointF pos = centre + QPointF(std::cos(angle), std::sin(angle)) * 300.0;
+    sendMouse(canvas, QEvent::MouseMove, pos, Qt::NoButton, Qt::MiddleButton);
+  });
+  sendMouse(canvas, QEvent::MouseButtonRelease, centre, Qt::MiddleButton, Qt::NoButton);
+}
+BENCHMARK(BM_PanBlendedLayers)->UseManualTime()->Unit(benchmark::kMillisecond);
 
 void BM_Zoom(benchmark::State& state) {
   pinsel::Canvas canvas;

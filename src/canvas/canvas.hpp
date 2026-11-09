@@ -13,8 +13,9 @@
 
 namespace pinsel {
 
-// Draws the visible layers as GPU tiles, with the mask as a red tint over them.
-// The brush and eraser paint on the current layer. The left
+// Draws the visible layers as GPU tiles, each by its blend mode and opacity,
+// with the mask as a red tint over them. The brush and eraser paint on the
+// current layer. The left
 // mouse button uses the tool, the middle button pans and the wheel zooms at the
 // cursor. The mask tool paints the mask with the brush's size and opacity, and
 // erases it while Alt is held.

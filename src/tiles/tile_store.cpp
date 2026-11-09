@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 namespace pinsel {
@@ -10,35 +11,137 @@ namespace pinsel {
 namespace {
 
 std::size_t tilesAcross(int pixels) {
-  return static_cast<std::size_t>((pixels + TileStore::kTileSize - 1) / TileStore::kTileSize);
+  const std::int64_t tile = TileStore::kTileSize;
+  return static_cast<std::size_t>((std::int64_t{pixels} + tile - 1) / tile);
+}
+
+QPainter::CompositionMode compositionMode(TileStore::BlendMode mode) {
+  switch (mode) {
+    case TileStore::BlendMode::Multiply:
+      return QPainter::CompositionMode_Multiply;
+    case TileStore::BlendMode::Screen:
+      return QPainter::CompositionMode_Screen;
+    case TileStore::BlendMode::Overlay:
+      return QPainter::CompositionMode_Overlay;
+    case TileStore::BlendMode::Normal:
+      break;
+  }
+  return QPainter::CompositionMode_SourceOver;
 }
 
 }  // namespace
 
-TileStore::TileStore(const QImage& image) {
-  if (image.isNull()) {
+TileStore::TileStore(const QImage& image)
+    : TileStore(
+          image.size(), 1,
+          [&image](std::size_t /*layer*/) {
+            LayerContent content;
+            content.name = QStringLiteral("Background");
+            content.image = image;
+            return content;
+          },
+          QImage(), 0) {}
+
+TileStore::TileStore(QSize size, std::size_t count, const LoadLayer& load, const QImage& mask,
+                     std::size_t current) {
+  if (size.isEmpty() || count == 0) {
     return;
   }
-  size_ = image.size();
-  columns_ = tilesAcross(image.width());
-  tile_count_ = columns_ * tilesAcross(image.height());
-  Layer background = emptyLayer();
-  background.id = ++last_layer_id_;
-  background.name = QStringLiteral("Background");
-  for (std::size_t index = 0; index < tile_count_; ++index) {
-    // Converting tile by tile, not the whole image first, keeps the peak at the
-    // source plus the tiles. The 32-bit formats convert in place.
-    QImage tile = image.copy(tileRect(index));
-    tile.convertTo(kFormat);
-    if (tile.isNull() || tile.format() != kFormat) {
+  size_ = size;
+  columns_ = tilesAcross(size.width());
+  tile_count_ = columns_ * tilesAcross(size.height());
+  mask_ = emptyLayer();
+  for (std::size_t index = 0; index < count; ++index) {
+    const std::optional<LayerContent> content = load(index);
+    Layer layer = emptyLayer();
+    if (!content || !fillLayer(layer, content->image, content->offset, kFormat)) {
       *this = TileStore();
       return;
     }
-    background.tiles.at(index) = std::move(tile);
+    layer.id = ++last_layer_id_;
+    layer.name = content->name;
+    layer.visible = content->visible;
+    layer.opacity = std::clamp(content->opacity, 0.0, 1.0);
+    layer.blend = content->blend;
+    layers_.push_back(std::move(layer));
   }
-  background.dirty.assign(tile_count_, true);
-  layers_.push_back(std::move(background));
-  mask_ = emptyLayer();
+  if (!fillLayer(mask_, mask, QPoint(), kMaskFormat)) {
+    *this = TileStore();
+    return;
+  }
+  current_ = std::min(current, layers_.size() - 1);
+}
+
+bool TileStore::fillLayer(Layer& layer, const QImage& image, QPoint offset,
+                          QImage::Format format) const {
+  const QRect area(offset, image.size());
+  for (std::size_t index = 0; index < tile_count_; ++index) {
+    const QRect rect = tileRect(index);
+    const QRect covered = rect.intersected(area);
+    if (covered.isEmpty()) {
+      continue;
+    }
+    // Converting tile by tile, not the whole image first, keeps the peak at the
+    // source plus the tiles. The 32-bit formats convert in place.
+    QImage part = image.copy(covered.translated(-offset));
+    part.convertTo(format);
+    if (part.isNull() || part.format() != format) {
+      return false;
+    }
+    if (covered != rect) {
+      QImage tile(rect.size(), format);
+      if (tile.isNull()) {
+        return false;
+      }
+      tile.fill(Qt::transparent);
+      QPainter painter(&tile);
+      painter.setCompositionMode(QPainter::CompositionMode_Source);
+      painter.drawImage(covered.topLeft() - rect.topLeft(), part);
+      painter.end();
+      part = std::move(tile);
+    }
+    layer.tiles.at(index) = std::move(part);
+    layer.dirty.at(index) = true;
+  }
+  return true;
+}
+
+std::optional<TileStore::LayerContent> TileStore::layerContent(std::size_t layer) const {
+  const Layer& source = layers_.at(layer);
+  QRect bounds;
+  for (std::size_t index = 0; index < source.tiles.size(); ++index) {
+    if (!source.tiles.at(index).isNull()) {
+      bounds |= tileRect(index);
+    }
+  }
+  LayerContent content{
+      .name = source.name,
+      .visible = source.visible,
+      .opacity = source.opacity,
+      .blend = source.blend,
+      .image = {},
+      .offset = bounds.topLeft(),
+  };
+  if (bounds.isEmpty()) {
+    return content;
+  }
+  content.image = QImage(bounds.size(), kFormat);
+  if (content.image.isNull()) {
+    return std::nullopt;
+  }
+  content.image.fill(Qt::transparent);
+  QPainter painter(&content.image);
+  painter.setCompositionMode(QPainter::CompositionMode_Source);
+  for (std::size_t index = 0; index < source.tiles.size(); ++index) {
+    if (!source.tiles.at(index).isNull()) {
+      painter.drawImage(tileRect(index).topLeft() - bounds.topLeft(), source.tiles.at(index));
+    }
+  }
+  return content;
+}
+
+bool TileStore::hasMask() const {
+  return std::ranges::any_of(mask_.tiles, [](const QImage& tile) { return !tile.isNull(); });
 }
 
 TileStore::Layer TileStore::emptyLayer() const {
@@ -81,6 +184,8 @@ QImage TileStore::toImage(Plane plane) const {
   image.fill(Qt::transparent);
   QPainter painter(&image);
   const auto draw = [&](const Layer& layer) {
+    painter.setOpacity(layer.opacity);
+    painter.setCompositionMode(compositionMode(layer.blend));
     for (std::size_t index = 0; index < layer.tiles.size(); ++index) {
       if (!layer.tiles.at(index).isNull()) {
         painter.drawImage(tileRect(index).topLeft(), layer.tiles.at(index));
@@ -162,6 +267,29 @@ void TileStore::setLayerVisible(std::size_t layer, bool visible) {
     return;
   }
   restack([this, layer, visible] { layers_.at(layer).visible = visible; });
+}
+
+void TileStore::setLayerOpacity(std::size_t layer, double opacity, bool join) {
+  opacity = std::clamp(opacity, 0.0, 1.0);
+  if (layer >= layers_.size() || layers_.at(layer).opacity == opacity) {
+    return;
+  }
+  const std::uint64_t id = layers_.at(layer).id;
+  if (join && open_.tiles.empty() && redo_.empty() && !undo_.empty() &&
+      undo_.back().opacity_of == id) {
+    layers_.at(layer).opacity = opacity;
+    undo_.back().revision = ++last_revision_;
+    return;
+  }
+  restack([this, layer, opacity] { layers_.at(layer).opacity = opacity; });
+  undo_.back().opacity_of = id;
+}
+
+void TileStore::setLayerBlendMode(std::size_t layer, BlendMode mode) {
+  if (layer >= layers_.size() || layers_.at(layer).blend == mode) {
+    return;
+  }
+  restack([this, layer, mode] { layers_.at(layer).blend = mode; });
 }
 
 void TileStore::save(Layer& layer, std::size_t index) {

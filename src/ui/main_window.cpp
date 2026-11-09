@@ -21,8 +21,10 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QStringList>
 #include <QToolBar>
 #include <QtConcurrentRun>
+#include <algorithm>
 #include <array>
 #include <optional>
 #include <tuple>
@@ -68,8 +70,22 @@ void addSliderRow(QFormLayout* form, const QString& label, Range range, const QS
   form->addRow(label, row);
 }
 
-bool isPng(const QString& path) {
-  return path.endsWith(QStringLiteral(".png"), Qt::CaseInsensitive);
+ImageFormat formatOfFilter(const QString& filter) {
+  for (const ImageFormat& format : kImageFormats) {
+    if (format.filter == filter) {
+      return format;
+    }
+  }
+  return kImageFormats.front();
+}
+
+ImageFormat firstFormat(bool layered) {
+  for (const ImageFormat& format : kImageFormats) {
+    if (format.layered == layered) {
+      return format;
+    }
+  }
+  return kImageFormats.front();
 }
 
 }  // namespace
@@ -224,8 +240,8 @@ void MainWindow::whenChangesAreSafe(const std::function<void()>& proceed) {
 }
 
 void MainWindow::save(const std::function<void(bool saved)>& done) {
-  // Save never writes PNG bytes into a file another format named.
-  if (isPng(path_)) {
+  // Save never writes into a file of a type pinsel cannot write, such as JPEG.
+  if (imageFormatOf(path_)) {
     saveTo(path_, done);
   } else {
     saveAs(done);
@@ -233,26 +249,40 @@ void MainWindow::save(const std::function<void(bool saved)>& done) {
 }
 
 void MainWindow::saveAs(const std::function<void(bool saved)>& done) {
+  // A PNG keeps one layer and no mask, so an image with more starts as
+  // OpenRaster.
+  const TileStore& tiles = canvas_->tiles();
   const QFileInfo current(path_);
-  const QString suggested =
+  const std::optional<ImageFormat> current_format = imageFormatOf(path_);
+  const ImageFormat format = firstFormat(tiles.layerCount() > 1 || tiles.hasMask() ||
+                                         (current_format && current_format->layered));
+  const QString base =
       path_.isEmpty() ? QDir(QStandardPaths::writableLocation(QStandardPaths::PicturesLocation))
-                            .filePath(QStringLiteral("Untitled.png"))
-                      : current.dir().filePath(current.completeBaseName() + QStringLiteral(".png"));
-  QFileDialog dialog(this, QStringLiteral("Save Image"), suggested,
-                     QStringLiteral("PNG image (*.png)"));
+                            .filePath(QStringLiteral("Untitled"))
+                      : current.dir().filePath(current.completeBaseName());
+  QStringList filters;
+  for (const ImageFormat& each : kImageFormats) {
+    filters.append(QString(each.filter));
+  }
+  QFileDialog dialog(this, QStringLiteral("Save Image"), base + u'.' + format.suffix);
+  dialog.setNameFilters(filters);
+  dialog.selectNameFilter(QString(format.filter));
   dialog.setAcceptMode(QFileDialog::AcceptSave);
-  // Adds .png before the dialog's own overwrite check, so the check sees the
-  // file that will be written.
-  dialog.setDefaultSuffix(QStringLiteral("png"));
+  // Adds the suffix before the dialog's own overwrite check, so the check sees
+  // the file that will be written.
+  dialog.setDefaultSuffix(QString(format.suffix));
+  connect(&dialog, &QFileDialog::filterSelected, &dialog, [&dialog](const QString& filter) {
+    dialog.setDefaultSuffix(QString(formatOfFilter(filter).suffix));
+  });
   if (dialog.exec() != QDialog::Accepted || dialog.selectedFiles().isEmpty()) {
     done(false);
     return;
   }
   QString path = dialog.selectedFiles().constFirst();
-  if (!isPng(path)) {
-    // A name with another suffix, such as photo.jpg, gets .png on top, which
-    // the dialog never checked.
-    path += QStringLiteral(".png");
+  if (!imageFormatOf(path)) {
+    // A name with another suffix, such as photo.jpg, gets the chosen type's
+    // suffix on top, which the dialog never checked.
+    path += u'.' + formatOfFilter(dialog.selectedNameFilter()).suffix;
     if (QFileInfo::exists(path) &&
         QMessageBox::question(
             this, QStringLiteral("Save Image"),
@@ -276,7 +306,8 @@ void MainWindow::saveTo(const QString& path, const std::function<void(bool saved
       .document = latest_open_,
       .done = done,
   };
-  save_watcher_->setFuture(QtConcurrent::run(writePng, canvas_->tiles().toImage(), path));
+  save_watcher_->setFuture(
+      QtConcurrent::run([tiles = canvas_->tiles(), path] { return writeImage(tiles, path); }));
   updateTitle();
 }
 
@@ -342,6 +373,10 @@ void MainWindow::askAndOpen() {
   for (const QByteArray& format : QImageReader::supportedImageFormats()) {
     patterns.append(QStringLiteral("*.") + QString::fromLatin1(format));
   }
+  for (const ImageFormat& format : kImageFormats) {
+    patterns.append(QStringLiteral("*.") + format.suffix);
+  }
+  patterns.removeDuplicates();
   const QString path = QFileDialog::getOpenFileName(
       this, QStringLiteral("Open Image"), QString(),
       QStringLiteral("Images (%1)").arg(patterns.join(QLatin1Char(' '))));

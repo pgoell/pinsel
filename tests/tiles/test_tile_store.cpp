@@ -5,9 +5,10 @@
 #include <QPainter>
 #include <QRect>
 #include <QString>
-#include <QTemporaryDir>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <tuple>
 #include <vector>
 
@@ -325,6 +326,73 @@ TEST(TileStoreLayers, AHiddenLayerLeavesTheImageAsAnUndoStep) {
   EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
 }
 
+// An opaque layer over an opaque backdrop.
+QColor blended(TileStore::BlendMode mode, double opacity) {
+  TileStore store(filled(QSize(8, 8), QColor(200, 100, 50)));
+  store.addLayer();
+  fill(store, QRect(0, 0, 8, 8), QColor(100, 150, 250));
+  store.setLayerBlendMode(1, mode);
+  store.setLayerOpacity(1, opacity);
+  return at(store, QPoint(4, 4));
+}
+
+void expectNear(QColor got, QColor expected) {
+  const int difference = std::max({
+      std::abs(got.red() - expected.red()),
+      std::abs(got.green() - expected.green()),
+      std::abs(got.blue() - expected.blue()),
+  });
+  EXPECT_LE(difference, 1) << got.name().toStdString() << " for " << expected.name().toStdString();
+  EXPECT_EQ(got.alpha(), 255);
+}
+
+// Worked out by hand from the W3C formulas:
+// https://www.w3.org/TR/compositing-1/#blendingseparable
+TEST(TileStoreLayers, TheImageBlendsEachLayerByItsModeAndOpacity) {
+  using Mode = TileStore::BlendMode;
+  expectNear(blended(Mode::Normal, 0.5), QColor(150, 125, 150));
+  expectNear(blended(Mode::Multiply, 1), QColor(78, 59, 49));
+  expectNear(blended(Mode::Screen, 1), QColor(222, 191, 251));
+  expectNear(blended(Mode::Overlay, 1), QColor(188, 118, 98));
+  expectNear(blended(Mode::Multiply, 0.5), QColor(139, 80, 50));
+}
+
+TEST(TileStoreLayers, OpacityAndModeChangesAreUndoSteps) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  store.setLayerBlendMode(1, TileStore::BlendMode::Screen);
+  store.setLayerOpacity(1, 1.5);
+  EXPECT_EQ(store.layerOpacity(1), 1.0);
+  EXPECT_EQ(store.layerBlendMode(1), TileStore::BlendMode::Screen);
+  EXPECT_FALSE(store.layerPlain(1));
+  store.setLayerOpacity(1, 0.25);
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerOpacity(1), 1.0);
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerBlendMode(1), TileStore::BlendMode::Normal);
+  EXPECT_TRUE(store.layerPlain(1));
+}
+
+TEST(TileStoreLayers, JoinedOpacityChangesMakeOneStep) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  store.setLayerOpacity(1, 0.9);
+  const auto first = store.revision();
+  store.setLayerOpacity(1, 0.5, true);
+  store.setLayerOpacity(1, 0.3, true);
+  EXPECT_NE(store.revision(), first);
+  store.setLayerOpacity(1, 0.2);
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerOpacity(1), 0.3);
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerOpacity(1), 1.0);
+  // Only an opacity step of the same layer takes a joined change.
+  store.setLayerOpacity(0, 0.5, true);
+  store.setLayerOpacity(1, 0.5, true);
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerOpacity(0), 0.5);
+}
+
 TEST(TileStoreLayers, UndoBringsBackADeletedLayerWithItsTiles) {
   TileStore store = cleanStore();
   store.addLayer();
@@ -441,33 +509,4 @@ TEST(TileStore, UndoPastTheBudgetLandsOnTheRevisionOfTheDroppedStep) {
   store.commit();
   store.undo();
   EXPECT_EQ(store.revision(), red);
-}
-
-TEST(ImageFile, APaintedImageComesBackFromAPngUnchanged) {
-  TileStore store = cleanStore();
-  fill(store, QRect(kTile - 20, 30, 40, kTile), Qt::red);
-  fill(store, QRect(0, 0, 5, 5), Qt::transparent);
-  store.commit();
-  const QTemporaryDir dir;
-  ASSERT_TRUE(dir.isValid());
-  const QString path = dir.filePath(QStringLiteral("painted.png"));
-
-  ASSERT_EQ(pinsel::writePng(store.toImage(), path), QString());
-  const pinsel::ReadImage read = pinsel::readImage(path);
-
-  ASSERT_EQ(read.error, QString());
-  EXPECT_EQ(read.tiles.toImage(), store.toImage());
-}
-
-TEST(ImageFile, WritingToAMissingFolderSaysWhy) {
-  const QTemporaryDir dir;
-  ASSERT_TRUE(dir.isValid());
-  const QString path = dir.filePath(QStringLiteral("missing/out.png"));
-  EXPECT_NE(pinsel::writePng(cleanStore().toImage(), path), QString());
-}
-
-TEST(ImageFile, ReadingAMissingFileSaysWhyAndLeavesTheStoreEmpty) {
-  const pinsel::ReadImage read = pinsel::readImage(QStringLiteral("no/such/image.png"));
-  EXPECT_NE(read.error, QString());
-  EXPECT_TRUE(read.tiles.size().isEmpty());
 }

@@ -4,6 +4,10 @@
 # cppcoreguidelines-owning-memory is off: Qt widgets are created with `new` and
 # owned by their parent, which deletes them.
 #
+# cppcoreguidelines-pro-type-reinterpret-cast is off: zlib reads and writes
+# unsigned char buffers, Qt hands out char ones, and reinterpret_cast is how
+# C++ views one byte type as another.
+#
 # bugprone-reserved-identifier allows the __sanitizer_ functions: the memory
 # tests declare them, since not every clang-tidy ships the sanitizer headers.
 Checks: >
@@ -17,7 +21,8 @@ Checks: >
   -readability-identifier-length,
   -cppcoreguidelines-avoid-magic-numbers,
   -readability-magic-numbers,
-  -cppcoreguidelines-owning-memory
+  -cppcoreguidelines-owning-memory,
+  -cppcoreguidelines-pro-type-reinterpret-cast
 WarningsAsErrors: "*"
 HeaderFilterRegex: "/(src|tests)/"
 CheckOptions:
