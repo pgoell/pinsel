@@ -1,14 +1,20 @@
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPointF>
 #include <QPolygonF>
+#include <QSaveFile>
 #include <QSize>
 #include <QStringList>
 #include <QTimer>
+#include <chrono>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 
+#include "app/memory.hpp"
 #include "app/project.hpp"
 #include "ui/main_window.hpp"
 #include "ui/theme.hpp"
@@ -47,6 +53,91 @@ QSize sizeOf(QCommandLineParser& parser, const QCommandLineOption& option) {
   return {width, height};
 }
 
+// Loads the model, then inpaints the mask with prompt, skipping each step whose
+// value is empty, then calls ready. Quits when the inpaint adds no layer.
+void loadAndInpaint(pinsel::MainWindow& window, const QString& model, const QString& prompt,
+                    const std::function<void()>& ready) {
+  const std::function<void()> inpaint = [&window, prompt, ready] {
+    if (prompt.isEmpty()) {
+      ready();
+      return;
+    }
+    window.inpaint(prompt, [ready](bool added) {
+      if (added) {
+        ready();
+      } else {
+        qCritical("The inpaint added no layer");
+        QApplication::exit(1);
+      }
+    });
+  };
+  if (model.isEmpty()) {
+    inpaint();
+  } else {
+    window.loadModel(model, [inpaint](const std::optional<pinsel::EngineFailure>&) { inpaint(); });
+  }
+}
+
+double toMiB(std::size_t bytes) {
+  return static_cast<double>(bytes) / (1024.0 * 1024.0);
+}
+
+// Writes what the process, the image and the engine hold, as JSON. Returns
+// false when the file could not be written.
+bool writeMemoryReport(const pinsel::MainWindow& window, const QString& path) {
+  const pinsel::TileStore& tiles = window.tiles();
+  QJsonObject report{
+      {QStringLiteral("process"), pinsel::toJson(pinsel::measureMemory())},
+      {
+          QStringLiteral("image"),
+          QJsonObject{
+              {QStringLiteral("tiles_mb"), toMiB(tiles.bytes())},
+              {QStringLiteral("undo_mb"), toMiB(tiles.undoBytes())},
+          },
+      },
+  };
+  if (const std::optional<pinsel::EngineMemory>& gpu = window.engineMemory()) {
+    report.insert(QStringLiteral("engine"), QJsonObject{
+                                                {QStringLiteral("free_mb"), gpu->free_mb},
+                                                {QStringLiteral("total_mb"), gpu->total_mb},
+                                                {QStringLiteral("peak_mb"), gpu->peak_mb},
+                                            });
+  }
+  QSaveFile file(path);
+  return file.open(QIODevice::WriteOnly) && file.write(QJsonDocument(report).toJson()) >= 0 &&
+         file.commit();
+}
+
+// What to do once the image, the model and the inpaint are ready: write the
+// memory report, then save the screenshot, skipping each step whose path is
+// empty, then quit. With neither, the window stays open.
+std::function<void()> whenReady(pinsel::MainWindow& window, const QString& screenshot,
+                                const QString& report) {
+  const std::function<void()> saveScreenshot = [&window, screenshot] {
+    if (screenshot.isEmpty()) {
+      QApplication::exit(0);
+    } else {
+      QApplication::exit(window.grab().save(screenshot) ? 0 : 1);
+    }
+  };
+  if (report.isEmpty()) {
+    return screenshot.isEmpty() ? std::function<void()>([] {}) : saveScreenshot;
+  }
+  return [&window, report, saveScreenshot] {
+    // The frame after an upload trims the driver's upload memory, and the
+    // driver frees some of it a little later.
+    constexpr auto kSettle = std::chrono::seconds(2);
+    QTimer::singleShot(kSettle, &window, [&window, report, saveScreenshot] {
+      if (writeMemoryReport(window, report)) {
+        saveScreenshot();
+      } else {
+        qCritical("Could not write %s", qPrintable(report));
+        QApplication::exit(1);
+      }
+    });
+  };
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -78,8 +169,20 @@ int main(int argc, char** argv) {
       QStringLiteral("load-model"),
       QStringLiteral("Load an SDXL checkpoint; a screenshot waits until the load ends."),
       QStringLiteral("path"));
+  const QCommandLineOption inpaint(
+      QStringLiteral("inpaint"),
+      QStringLiteral("After the model loads, inpaint the mask; a screenshot waits for the layer."),
+      QStringLiteral("prompt"));
+  const QCommandLineOption memory(
+      QStringLiteral("memory-report"),
+      QStringLiteral("When the image is ready, wait for the GPU to settle, then save what the "
+                     "process, the image and the engine hold as JSON. Quits unless --screenshot "
+                     "follows."),
+      QStringLiteral("path"));
   parser.addOption(screenshot);
+  parser.addOption(memory);
   parser.addOption(model);
+  parser.addOption(inpaint);
   parser.addOption(lasso);
   parser.addOption(layers);
   parser.addOption(open);
@@ -104,10 +207,11 @@ int main(int argc, char** argv) {
     window.setAttribute(Qt::WA_DontShowOnScreen);
   }
   window.show();
-  const std::function<void()> saveScreenshot = [&] {
-    QApplication::exit(window.grab().save(parser.value(screenshot)) ? 0 : 1);
+  const std::function<void()> ready =
+      whenReady(window, parser.value(screenshot), parser.value(memory));
+  const std::function<void()> afterOpen = [&] {
+    loadAndInpaint(window, parser.value(model), parser.value(inpaint), ready);
   };
-  const std::function<void()> ready = parser.isSet(screenshot) ? saveScreenshot : [] {};
   if (parser.isSet(open)) {
     window.openImage(parser.value(open), [&](const QString& error) {
       window.addLayers(layer_count);
@@ -116,14 +220,11 @@ int main(int argc, char** argv) {
         qCritical("Could not open %s: %s", qPrintable(parser.value(open)), qPrintable(error));
         QApplication::exit(1);
       } else {
-        ready();
+        afterOpen();
       }
     });
-  } else if (parser.isSet(model)) {
-    window.loadModel(parser.value(model),
-                     [&](const std::optional<pinsel::EngineFailure>&) { ready(); });
   } else {
-    QTimer::singleShot(0, &window, ready);
+    QTimer::singleShot(0, &window, afterOpen);
   }
   return QApplication::exec();
 }

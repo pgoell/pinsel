@@ -1081,6 +1081,7 @@ source = { editable = "." }
 diffusers = [
     { name = "accelerate" },
     { name = "diffusers" },
+    { name = "pillow" },
     { name = "safetensors" },
     { name = "torch", version = "2.11.0+cu128", source = { registry = "https://download.pytorch.org/whl/cu128" }, marker = "sys_platform == 'win32'" },
     { name = "torch", version = "2.15.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
@@ -1096,6 +1097,7 @@ dev = [
 requires-dist = [
     { name = "accelerate", marker = "extra == 'diffusers'", specifier = ">=1.0" },
     { name = "diffusers", marker = "extra == 'diffusers'", specifier = ">=0.32" },
+    { name = "pillow", marker = "extra == 'diffusers'", specifier = ">=10" },
     { name = "safetensors", marker = "extra == 'diffusers'", specifier = ">=0.4" },
     { name = "torch", marker = "sys_platform == 'win32' and extra == 'diffusers'", specifier = ">=2.5", index = "https://download.pytorch.org/whl/cu128" },
     { name = "torch", marker = "sys_platform != 'win32' and extra == 'diffusers'", specifier = ">=2.5" },

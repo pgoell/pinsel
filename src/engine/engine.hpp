@@ -8,8 +8,10 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
+class QJsonObject;
 class QProcess;
 
 namespace pinsel {
@@ -24,6 +26,20 @@ struct GenerateRequest {
   QString output;
 };
 
+// Redraws the white part of mask in image. Both are PNGs of the same size,
+// which the output keeps.
+struct InpaintRequest {
+  QString prompt;
+  QString negative_prompt;
+  int steps = 30;
+  std::uint32_t seed = 0;
+  // How far from the image the masked part may go: 1 starts it from noise.
+  double strength = 1.0;
+  QString image;
+  QString mask;
+  QString output;
+};
+
 struct EngineFailure {
   enum class Kind : std::uint8_t {
     Cancelled,
@@ -35,6 +51,14 @@ struct EngineFailure {
   };
   Kind kind;
   QString message;
+};
+
+// The engine's GPU, in MiB, as it reported at the end of a job.
+struct EngineMemory {
+  double free_mb;
+  double total_mb;
+  // The most the engine held at once during the job.
+  double peak_mb;
 };
 
 struct EngineProgress {
@@ -73,18 +97,31 @@ class Engine {
   // Each returns the new job's id.
   int load(const QString& model);
   int generate(const GenerateRequest& request);
+  int inpaint(const InpaintRequest& request);
   // Does nothing for a job that has ended.
   void cancel(int job);
+  // The model the queued jobs will run on, or empty when a load failed or none
+  // was asked for.
+  [[nodiscard]] const QString& model() const {
+    return model_;
+  }
   [[nodiscard]] bool busy() const {
     return !open_.empty();
   }
+  // From the last job that finished, if its engine reports memory.
+  [[nodiscard]] const std::optional<EngineMemory>& memory() const {
+    return memory_;
+  }
 
  private:
+  // Sends a job that needs the model, loading it first after a restart.
+  int submit(QJsonObject request);
   void start();
   void send(const QByteArray& line);
   void readEvents();
   void handleLines(const QByteArray& lines);
   void handle(const QByteArray& line);
+  void readMemory(const QJsonObject& gpu);
   void end(int wire_job);
   void fail(int job, const EngineFailure& failure);
   void stopped(const QString& message);
@@ -106,6 +143,7 @@ class Engine {
   // it. A job after a restart loads it again.
   QString model_;
   bool process_has_model_ = false;
+  std::optional<EngineMemory> memory_;
 };
 
 }  // namespace pinsel

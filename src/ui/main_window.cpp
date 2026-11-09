@@ -34,7 +34,6 @@
 #include "canvas/canvas.hpp"
 #include "tiles/tile_store.hpp"
 #include "ui/dialogs/new_image_dialog.hpp"
-#include "ui/engine/engine_status.hpp"
 #include "ui/layers/layers_panel.hpp"
 
 namespace pinsel {
@@ -96,6 +95,12 @@ MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       canvas_(new Canvas(this)),
       engine_status_(new EngineStatus([this] { cancelJobs(); }, this)),
+      prompt_(new PromptPanel(
+          canvas_,
+          [this](const InpaintRequest& request, PromptPanel::Ended ended) {
+            return runInpaint(request, std::move(ended));
+          },
+          [this] { return latest_open_; }, this)),
       engine_(std::make_unique<Engine>(
           Engine::defaultCommand(),
           EngineEvents{
@@ -105,8 +110,9 @@ MainWindow::MainWindow(QWidget* parent)
                       engine_status_->showProgress(progress);
                     }
                   },
-              .finished = [this](int job, const QString& /*output*/) { endJob(job, std::nullopt); },
-              .failed = [this](int job, const EngineFailure& failure) { endJob(job, failure); },
+              .finished = [this](int job,
+                                 const QString& output) { endJob(job, std::nullopt, output); },
+              .failed = [this](int job, const EngineFailure& failure) { endJob(job, failure, {}); },
           })),
       save_watcher_(new QFutureWatcher<QString>(this)) {
   connect(save_watcher_, &QFutureWatcher<QString>::finished, this, &MainWindow::finishSave);
@@ -165,14 +171,48 @@ void MainWindow::addMenus() {
 
   QMenu* diffusion = menuBar()->addMenu(QStringLiteral("&Diffusion"));
   diffusion->addAction(QStringLiteral("&Load Model..."), this, &MainWindow::chooseModel);
+  diffusion->addAction(QStringLiteral("&Inpaint Mask"), prompt_, [this] { prompt_->generate(); });
   diffusion->addAction(QStringLiteral("&Cancel"), this, &MainWindow::cancelJobs);
 }
 
 void MainWindow::loadModel(const QString& path,
                            std::function<void(const std::optional<EngineFailure>&)> ended) {
   const int job = engine_->load(path);
-  engine_jobs_[job] = {.model = path, .ended = std::move(ended)};
-  engine_status_->showLoad(path);
+  engine_jobs_[job] = {
+      .kind = EngineStatus::Job::Load,
+      .model = path,
+      .ended =
+          [ended = std::move(ended)](const std::optional<EngineFailure>& failure, const QString&) {
+            if (ended) {
+              ended(failure);
+            }
+          },
+  };
+  engine_status_->showStart(EngineStatus::Job::Load, path);
+}
+
+void MainWindow::inpaint(const QString& prompt, const std::function<void(bool added)>& done) {
+  prompt_->setPrompt(prompt);
+  prompt_->generate(done);
+}
+
+bool MainWindow::runInpaint(const InpaintRequest& request, PromptPanel::Ended ended) {
+  const QString model = engine_->model();
+  if (model.isEmpty()) {
+    return false;
+  }
+  const int job = engine_->inpaint(request);
+  engine_jobs_[job] = {
+      .kind = EngineStatus::Job::Inpaint,
+      .model = model,
+      .ended =
+          [this, document = latest_open_, ended = std::move(ended)](
+              const std::optional<EngineFailure>& failure, const QString& output) {
+            ended(failure, document == latest_open_ ? output : QString());
+          },
+  };
+  engine_status_->showStart(EngineStatus::Job::Inpaint, model);
+  return true;
 }
 
 void MainWindow::cancelJobs() {
@@ -181,15 +221,15 @@ void MainWindow::cancelJobs() {
   }
 }
 
-void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure) {
+void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure,
+                        const QString& output) {
   auto node = engine_jobs_.extract(job);
   if (node.empty()) {
     return;
   }
-  engine_status_->showEnd(node.mapped().model, failure, !engine_jobs_.empty());
-  if (node.mapped().ended) {
-    node.mapped().ended(failure);
-  }
+  const EngineJob& ended = node.mapped();
+  engine_status_->showEnd(ended.kind, ended.model, failure, !engine_jobs_.empty());
+  ended.ended(failure, output);
 }
 
 void MainWindow::chooseModel() {
@@ -252,6 +292,10 @@ void MainWindow::showImage(TileStore tiles, const QString& path) {
   has_image_ = true;
   saved_revision_ = canvas_->tiles().revision();
   updateTitle();
+}
+
+const TileStore& MainWindow::tiles() const {
+  return canvas_->tiles();
 }
 
 bool MainWindow::isModified() const {
@@ -515,8 +559,14 @@ void MainWindow::addPanels() {
   brush->setWidget(settings);
   addDockWidget(Qt::RightDockWidgetArea, brush);
 
+  auto* prompt = new QDockWidget(QStringLiteral("Prompt"), this);
+  prompt_->setParent(prompt);
+  prompt->setWidget(prompt_);
+  addDockWidget(Qt::RightDockWidgetArea, prompt);
+
   view_menu_->addAction(layers->toggleViewAction());
   view_menu_->addAction(brush->toggleViewAction());
+  view_menu_->addAction(prompt->toggleViewAction());
 }
 
 }  // namespace pinsel

@@ -87,6 +87,33 @@ int Engine::load(const QString& model) {
 }
 
 int Engine::generate(const GenerateRequest& request) {
+  return submit({
+      {"op", "generate"},
+      {"prompt", request.prompt},
+      {"negative_prompt", request.negative_prompt},
+      {"steps", request.steps},
+      {"seed", static_cast<qint64>(request.seed)},
+      {"width", request.size.width()},
+      {"height", request.size.height()},
+      {"output", request.output},
+  });
+}
+
+int Engine::inpaint(const InpaintRequest& request) {
+  return submit({
+      {"op", "inpaint"},
+      {"prompt", request.prompt},
+      {"negative_prompt", request.negative_prompt},
+      {"steps", request.steps},
+      {"seed", static_cast<qint64>(request.seed)},
+      {"strength", request.strength},
+      {"image", request.image},
+      {"mask", request.mask},
+      {"output", request.output},
+  });
+}
+
+int Engine::submit(QJsonObject request) {
   const int job = ++next_job_;
   open_.insert(job);
   start();
@@ -98,17 +125,8 @@ int Engine::generate(const GenerateRequest& request) {
     send(lineOf({{"op", "load"}, {"job", reload}, {"model", model_}}));
   }
   owner_[job] = job;
-  send(lineOf({
-      {"op", "generate"},
-      {"job", job},
-      {"prompt", request.prompt},
-      {"negative_prompt", request.negative_prompt},
-      {"steps", request.steps},
-      {"seed", static_cast<qint64>(request.seed)},
-      {"width", request.size.width()},
-      {"height", request.size.height()},
-      {"output", request.output},
-  }));
+  request.insert(QStringLiteral("job"), job);
+  send(lineOf(request));
   return job;
 }
 
@@ -221,6 +239,9 @@ void Engine::handle(const QByteArray& line) {
   if (!open) {
     return;
   }
+  if (kind == QLatin1String("done")) {
+    readMemory(event.value(QLatin1String("gpu")).toObject());
+  }
   if (kind == QLatin1String("done") && wire == job) {
     open_.erase(job);
     if (events_.finished) {
@@ -232,6 +253,17 @@ void Engine::handle(const QByteArray& line) {
                   .message = event.value(QLatin1String("message")).toString(),
               });
   }
+}
+
+void Engine::readMemory(const QJsonObject& gpu) {
+  if (gpu.isEmpty()) {
+    return;
+  }
+  memory_ = EngineMemory{
+      .free_mb = gpu.value(QLatin1String("free_mb")).toDouble(),
+      .total_mb = gpu.value(QLatin1String("total_mb")).toDouble(),
+      .peak_mb = gpu.value(QLatin1String("peak_mb")).toDouble(),
+  };
 }
 
 void Engine::end(int wire_job) {

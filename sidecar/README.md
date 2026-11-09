@@ -18,13 +18,14 @@ Every request carries a `job` id that pinsel picks. The engine runs jobs one at 
 | --- | --- |
 | `load` | `model`: path to an SDXL checkpoint, which must be `.safetensors`. Lets go of the model held before. |
 | `generate` | `prompt`, `negative_prompt`, `steps`, `seed`, `width`, `height`, `output`: path for the PNG. Needs a loaded model. |
+| `inpaint` | `prompt`, `negative_prompt`, `steps`, `seed`, `strength` (0.001 to 1: how far the masked part may move from the image; 1 starts it from noise; a low strength adds steps so at least one runs), `image` and `mask`: paths to PNGs of the same size, `output`: path for the PNG, at that size. Redraws where the mask is white and keeps the rest. Needs a loaded model; the sizes should be multiples of 64. |
 | `cancel` | Ends the job named by `job` at its next progress report, or before it starts. |
 
 | Event | Fields |
 | --- | --- |
 | `ready` | `engine`: its name. Sent once, first. |
-| `progress` | `job`, `stage` (`load` or `generate`), `done`, `total`. |
-| `done` | `job`, and `output` for `generate`. |
+| `progress` | `job`, `stage` (`load`, or `generate` for both `generate` and `inpaint`), `done`, `total`. |
+| `done` | `job`, and `output` for `generate` and `inpaint`. An engine on a GPU may add `gpu`: `free_mb` and `total_mb` for the whole card after the job, and `peak_mb`, the most the engine held during it. |
 | `error` | `job` (null for a line it could not read), `kind` (`cancelled`, `oom` or `failed`), `message`. |
 
 After `oom` the engine has freed what it could and keeps running. After a `load` ends in any error it holds no model. A cancel that arrives after a job's last progress report changes nothing: the job ends `done`. If the process ends, pinsel fails every open job and starts it again for the next one, loading the last model first.

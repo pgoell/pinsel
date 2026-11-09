@@ -2,6 +2,7 @@
 
 #include <QString>
 #include <QWidget>
+#include <cstdint>
 #include <functional>
 #include <optional>
 
@@ -14,15 +15,20 @@ class QToolButton;
 namespace pinsel {
 
 // Shows, for the status bar, what the engine is doing: the model it holds, a
-// load's progress with a button that calls cancel, or why a load failed.
+// job's progress with a button that calls cancel, or why a job failed.
 class EngineStatus : public QWidget {
  public:
+  enum class Job : std::uint8_t { Load, Inpaint };
+
   explicit EngineStatus(std::function<void()> cancel, QWidget* parent = nullptr);
 
-  void showLoad(const QString& path);
+  // model is the checkpoint's path: the one a load reads, or the one an
+  // inpaint runs on.
+  void showStart(Job job, const QString& model);
   void showProgress(const EngineProgress& progress);
   // busy says whether another job is still open.
-  void showEnd(const QString& path, const std::optional<EngineFailure>& failure, bool busy);
+  void showEnd(Job job, const QString& model, const std::optional<EngineFailure>& failure,
+               bool busy);
 
  private:
   void showText(const QString& text);

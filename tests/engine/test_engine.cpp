@@ -1,11 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <QApplication>
+#include <QColor>
+#include <QDir>
 #include <QElapsedTimer>
 #include <QEventLoop>
+#include <QImage>
 #include <QLatin1StringView>
+#include <QPainter>
 #include <QString>
 #include <QStringList>
+#include <QTemporaryDir>
 #include <array>
 #include <functional>
 #include <optional>
@@ -14,11 +19,14 @@
 #include <vector>
 
 #include "engine/engine.hpp"
+#include "inpaint/inpaint.hpp"
+#include "tiles/tile_store.hpp"
 
 namespace {
 
 using pinsel::Engine;
 using pinsel::EngineFailure;
+using pinsel::EngineMemory;
 using pinsel::EngineProgress;
 using pinsel::GenerateRequest;
 using Kind = EngineFailure::Kind;
@@ -124,6 +132,7 @@ TEST(Engine, ReportsLoadProgressThenFinishes) {
   const int job = h.engine.load(kModel);
   EXPECT_EQ(h.waitFor(job).kind(), std::nullopt);
   EXPECT_EQ(h.counts(job, kLoad), (std::vector<int>{1, 2}));
+  EXPECT_EQ(h.engine.model(), kModel);
 }
 
 TEST(Engine, ReportsEachStepAndTheOutput) {
@@ -135,6 +144,17 @@ TEST(Engine, ReportsEachStepAndTheOutput) {
   EXPECT_EQ(ended.output, QStringLiteral("out.png"));
   EXPECT_EQ(h.counts(job, kGenerate), (std::vector<int>{1, 2, 3, 4}));
   EXPECT_FALSE(h.engine.busy());
+}
+
+TEST(Engine, KeepsTheGpuMemoryTheLastJobReported) {
+  Harness h;
+  EXPECT_FALSE(h.engine.memory().has_value());
+  h.engine.load(kModel);
+  EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox"), 1))).message(), "");
+  const EngineMemory memory = h.engine.memory().value_or(EngineMemory{});
+  EXPECT_EQ(memory.free_mb, 1024.0);
+  EXPECT_EQ(memory.total_mb, 8192.0);
+  EXPECT_EQ(memory.peak_mb, 6912.0);
 }
 
 TEST(Engine, CancelEndsTheRunningJob) {
@@ -176,6 +196,7 @@ TEST(Engine, ACrashFailsTheJobAndTheNextJobLoadsTheModelAgain) {
 TEST(Engine, AModelThatCrashesTheEngineIsNotLoadedAgain) {
   Harness h;
   EXPECT_EQ(h.waitFor(h.engine.load(QStringLiteral("crash"))).kind(), Kind::Stopped);
+  EXPECT_TRUE(h.engine.model().isEmpty());
   EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox")))).message(),
             "RuntimeError: No model loaded");
 }
@@ -184,8 +205,68 @@ TEST(Engine, AFailedLoadLeavesNoModel) {
   Harness h;
   h.engine.load(kModel);
   EXPECT_EQ(h.waitFor(h.engine.load(QStringLiteral("missing"))).kind(), Kind::Failed);
+  EXPECT_TRUE(h.engine.model().isEmpty());
   EXPECT_EQ(h.waitFor(h.engine.generate(request(QStringLiteral("a fox")))).message(),
             "RuntimeError: No model loaded");
+}
+
+// A white image with a square masked at the given place.
+pinsel::TileStore maskedStore(QRect masked) {
+  QImage white(1100, 700, pinsel::TileStore::kFormat);
+  white.fill(Qt::white);
+  pinsel::TileStore store(white);
+  store.paint(
+      masked, [&](QPainter& painter, std::size_t) { painter.fillRect(masked, Qt::black); },
+      pinsel::TileStore::Plane::Mask);
+  return store;
+}
+
+// The input for the store's mask, or an empty one, after a failed check, when
+// there is none.
+pinsel::InpaintInput inputOf(const pinsel::TileStore& store) {
+  const std::optional<pinsel::InpaintInput> input = pinsel::inpaintInput(store);
+  EXPECT_TRUE(input);
+  return input ? *input : pinsel::InpaintInput{};
+}
+
+// Writes the input as the panel does and names the files in a request.
+pinsel::InpaintRequest writeInput(const pinsel::InpaintInput& input, const QTemporaryDir& dir) {
+  const QDir folder(dir.path());
+  pinsel::InpaintRequest written{
+      .prompt = QStringLiteral("a fox"),
+      .negative_prompt = {},
+      .steps = 2,
+      .seed = 1,
+      .strength = 1.0,
+      .image = folder.filePath(QStringLiteral("image.png")),
+      .mask = folder.filePath(QStringLiteral("mask.png")),
+      .output = folder.filePath(QStringLiteral("out.png")),
+  };
+  EXPECT_TRUE(input.image.save(written.image) && input.mask.save(written.mask));
+  return written;
+}
+
+// The whole path but the panel: crop the mask, let the engine redraw it, and
+// lay the answer back as a layer.
+TEST(Engine, InpaintRedrawsOnlyTheMaskAsANewLayer) {
+  Harness h;
+  const QRect masked(500, 300, 60, 60);
+  pinsel::TileStore store = maskedStore(masked);
+  const pinsel::InpaintInput input = inputOf(store);
+  const QTemporaryDir dir;
+  const pinsel::InpaintRequest sent = writeInput(input, dir);
+
+  h.engine.load(kModel);
+  const int job = h.engine.inpaint(sent);
+  const Ended ended = h.waitFor(job);
+  EXPECT_EQ(ended.output, sent.output) << ended.message();
+  EXPECT_EQ(h.counts(job, kGenerate), (std::vector<int>{1, 2}));
+
+  const auto layer = pinsel::inpaintLayer(input, QImage(ended.output), QStringLiteral("x"));
+  ASSERT_TRUE(layer && store.addLayer(*layer));
+  const QImage result = store.toImage();
+  EXPECT_EQ(result.pixelColor(masked.center()), QColor(Qt::black));
+  EXPECT_EQ(result.pixelColor(masked.topLeft() - QPoint(20, 20)), QColor(Qt::white));
 }
 
 TEST(Engine, AProgramThatCannotStartFailsTheJob) {

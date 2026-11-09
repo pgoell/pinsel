@@ -5,9 +5,11 @@ from pathlib import Path
 from typing import Any
 
 import torch
-from diffusers import StableDiffusionXLPipeline
+from diffusers import StableDiffusionXLInpaintPipeline, StableDiffusionXLPipeline
+from PIL import Image
 
 from .protocol import Job, OutOfMemory
+from .schedule import inpaint_steps
 
 # SDXL base 1.0's component configs and tokenizers, without weights. With them
 # a load needs no Hugging Face Hub, which from_single_file would ask otherwise.
@@ -24,10 +26,13 @@ class DiffusersEngine:
 
     def run(self, job: Job) -> dict[str, Any]:
         op = job.request["op"]
-        if op not in ("load", "generate"):
+        handlers = {"load": self._load, "generate": self._generate, "inpaint": self._inpaint}
+        if op not in handlers:
             raise ValueError(f"unknown op {op!r}")
+        if self.device == "cuda":
+            torch.cuda.reset_peak_memory_stats()
         try:
-            return self._load(job) if op == "load" else self._generate(job)
+            return handlers[op](job) | self._memory()
         except torch.cuda.OutOfMemoryError as error:
             message = str(error).splitlines()[0]
         # Out of the except block: its traceback holds the frames, and with them
@@ -38,6 +43,15 @@ class DiffusersEngine:
     def unload(self) -> None:
         self.pipe = None
         self._free()
+
+    def _memory(self) -> dict[str, Any]:
+        """The GPU's memory after the job and the most this process held during it, in MiB."""
+        if self.device != "cuda":
+            return {}
+        free, total = torch.cuda.mem_get_info()
+        mib = 1024 * 1024
+        peak = torch.cuda.max_memory_reserved()
+        return {"gpu": {"free_mb": free / mib, "total_mb": total / mib, "peak_mb": peak / mib}}
 
     def _free(self) -> None:
         gc.collect()
@@ -84,4 +98,38 @@ class DiffusersEngine:
             callback_on_step_end=step_end,
         ).images[0]
         image.save(request["output"])
+        return {"output": request["output"]}
+
+    def _inpaint(self, job: Job) -> dict[str, Any]:
+        if self.pipe is None:
+            raise RuntimeError("No model loaded")
+        request = job.request
+        strength = float(request.get("strength", 1.0))
+        steps, total = inpaint_steps(int(request.get("steps", 30)), strength)
+        with Image.open(request["image"]) as file:
+            image = file.convert("RGB")
+        with Image.open(request["mask"]) as file:
+            mask = file.convert("L")
+
+        def step_end(_pipe, step: int, _timestep, kwargs: dict[str, Any]) -> dict[str, Any]:
+            job.progress("generate", min(step + 1, total), total)
+            return kwargs
+
+        job.progress("generate", 0, total)
+        # Shares the loaded model's weights, so it costs no GPU memory of its own.
+        pipe = StableDiffusionXLInpaintPipeline.from_pipe(self.pipe)
+        generator = torch.Generator(self.device).manual_seed(int(request.get("seed", 0)))
+        result = pipe(
+            prompt=request["prompt"],
+            negative_prompt=request.get("negative_prompt") or None,
+            image=image,
+            mask_image=mask,
+            strength=strength,
+            num_inference_steps=steps,
+            width=image.width,
+            height=image.height,
+            generator=generator,
+            callback_on_step_end=step_end,
+        ).images[0]
+        result.save(request["output"])
         return {"output": request["output"]}

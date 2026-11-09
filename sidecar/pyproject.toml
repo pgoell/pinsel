@@ -12,6 +12,7 @@ dependencies = []
 diffusers = [
   "accelerate>=1.0",
   "diffusers>=0.32",
+  "pillow>=10",
   "safetensors>=0.4",
   "torch>=2.5",
   "transformers>=4.45",

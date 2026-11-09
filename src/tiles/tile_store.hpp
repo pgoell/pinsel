@@ -128,6 +128,10 @@ class TileStore {
   //
   // Puts an empty layer above the current one and makes it current.
   void addLayer();
+  // Puts a layer holding content above the current one and makes it current.
+  // What falls outside the image is cut. Returns false, and changes nothing,
+  // when there is no memory.
+  bool addLayer(const LayerContent& content);
   // Removes the current layer, unless it is the only one, and makes the one
   // below current. Returns false when nothing was removed.
   bool removeLayer();
