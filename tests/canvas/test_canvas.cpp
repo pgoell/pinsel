@@ -35,7 +35,8 @@ void ensureApp() {
   static std::array<char, 6> name{"tests"};
   static std::array<char*, 2> argv{name.data(), nullptr};
   // Never deleted: Qt's own statics may outlive any owner the test could give it.
-  static const QApplication* const app = new QApplication(argc, argv.data());
+  static const QCoreApplication* const app =
+      QCoreApplication::instance() != nullptr ? nullptr : new QApplication(argc, argv.data());
   std::ignore = app;
 }
 

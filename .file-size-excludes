@@ -1,2 +1,4 @@
 # OpenRaster images are zip archives, which no person or agent edits by hand.
 **/*.ora
+# SDXL's config and tokenizer files, as Stability AI publishes them.
+sidecar/pinsel_sidecar/sdxl_config/**

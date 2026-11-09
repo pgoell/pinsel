@@ -1,4 +1,4 @@
-#include "ui/new_image_dialog.hpp"
+#include "ui/dialogs/new_image_dialog.hpp"
 
 #include <QColorDialog>
 #include <QDialog>

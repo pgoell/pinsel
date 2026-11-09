@@ -1,4 +1,4 @@
-#include "project.hpp"
+#include "app/project.hpp"
 
 namespace pinsel {
 

@@ -9,9 +9,12 @@
 #include <QString>
 #include <cstdint>
 #include <functional>
+#include <map>
+#include <memory>
 #include <optional>
 
 #include "brush/brush.hpp"
+#include "engine/engine.hpp"
 #include "tiles/tile_store.hpp"
 
 class QAction;
@@ -20,6 +23,7 @@ class QCloseEvent;
 namespace pinsel {
 
 class Canvas;
+class EngineStatus;
 class LayersPanel;
 
 class MainWindow : public QMainWindow {
@@ -37,6 +41,10 @@ class MainWindow : public QMainWindow {
   void addLayers(int count);
   // Fills the closed outline, in image pixels, into the mask, as the lasso does.
   void fillMask(const QPolygonF& outline);
+  // Loads an SDXL checkpoint into the engine, and calls ended with the failure,
+  // or with none once it is loaded. The status bar shows its progress.
+  void loadModel(const QString& path,
+                 std::function<void(const std::optional<EngineFailure>&)> ended);
 
  protected:
   void closeEvent(QCloseEvent* event) override;
@@ -45,6 +53,9 @@ class MainWindow : public QMainWindow {
   void chooseImage();
   void askAndOpen();
   void chooseNewImage();
+  void chooseModel();
+  void cancelJobs();
+  void endJob(int job, const std::optional<EngineFailure>& failure);
   void showImage(TileStore tiles, const QString& path);
   [[nodiscard]] bool isModified() const;
   void updateTitle();
@@ -65,6 +76,13 @@ class MainWindow : public QMainWindow {
 
   Canvas* canvas_ = nullptr;
   LayersPanel* layers_ = nullptr;
+  EngineStatus* engine_status_ = nullptr;
+  std::unique_ptr<Engine> engine_;
+  struct EngineJob {
+    QString model;
+    std::function<void(const std::optional<EngineFailure>&)> ended;
+  };
+  std::map<int, EngineJob> engine_jobs_;
   BrushSettings brush_;
   int latest_open_ = 0;
   QMenu* view_menu_ = nullptr;
