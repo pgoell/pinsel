@@ -200,11 +200,10 @@ jobs:
         env:
           FROM: ${{ steps.round.outputs.from }}
           ROUND: ${{ steps.round.outputs.round }}
-          MAX: ${{ steps.round.outputs.max }}
         run: |
           {
             echo 'text<<PROMPT_END'
-            echo "Round $ROUND of $MAX. FROM: $FROM. HEAD: $HEAD_SHA."
+            echo "Round $ROUND. FROM: $FROM. HEAD: $HEAD_SHA."
             echo
             sed -e "s|{FROM}|$FROM|g" ".github/review/$KIND.md"
             echo 'PROMPT_END'
