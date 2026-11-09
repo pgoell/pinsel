@@ -21,8 +21,8 @@
 
 namespace {
 
-// The option's value as X,Y pairs separated by spaces. Anything else shows the
-// help and quits.
+// The option's value as at least three X,Y pairs separated by spaces. Anything
+// else shows the help and quits.
 QPolygonF pointsOf(QCommandLineParser& parser, const QCommandLineOption& option) {
   QPolygonF points;
   for (const QString& point : parser.value(option).split(QLatin1Char(' '), Qt::SkipEmptyParts)) {
@@ -35,6 +35,9 @@ QPolygonF pointsOf(QCommandLineParser& parser, const QCommandLineOption& option)
       parser.showHelp(1);
     }
     points.append(QPointF(x, y));
+  }
+  if (parser.isSet(option) && points.size() < 3) {
+    parser.showHelp(1);
   }
   return points;
 }
