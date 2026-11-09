@@ -4,7 +4,8 @@ Native image editor for generating images and local edits, with its own GPU kern
 
 ## Layout
 
-- `src/`: the library (`project.hpp`, `project.cpp`) and the executable (`main.cpp`)
+- `src/app/`: the library (`project.hpp`, `project.cpp`) and the executable (`main.cpp`)
+- `src/engine/`: runs diffusion models in another process over a small JSON Lines protocol; `sidecar/` is the Python engine behind it, run by uv and kept out of the CMake build
 - `src/ui/`: Qt 6 Widgets: the main window, its menus, tool bar and panels
 - `src/canvas/`: the canvas, a `QRhiWidget` that draws the image as GPU tiles, and `View`, its pan and zoom math
 - `tests/`: GoogleTest, run by ctest

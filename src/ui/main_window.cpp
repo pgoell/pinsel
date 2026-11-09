@@ -21,6 +21,7 @@
 #include <QSlider>
 #include <QSpinBox>
 #include <QStandardPaths>
+#include <QStatusBar>
 #include <QStringList>
 #include <QToolBar>
 #include <QtConcurrentRun>
@@ -32,8 +33,9 @@
 
 #include "canvas/canvas.hpp"
 #include "tiles/tile_store.hpp"
+#include "ui/dialogs/new_image_dialog.hpp"
+#include "ui/engine/engine_status.hpp"
 #include "ui/layers/layers_panel.hpp"
-#include "ui/new_image_dialog.hpp"
 
 namespace pinsel {
 
@@ -93,10 +95,24 @@ ImageFormat firstFormat(bool layered) {
 MainWindow::MainWindow(QWidget* parent)
     : QMainWindow(parent),
       canvas_(new Canvas(this)),
+      engine_status_(new EngineStatus([this] { cancelJobs(); }, this)),
+      engine_(std::make_unique<Engine>(
+          Engine::defaultCommand(),
+          EngineEvents{
+              .progress =
+                  [this](int job, const EngineProgress& progress) {
+                    if (engine_jobs_.contains(job)) {
+                      engine_status_->showProgress(progress);
+                    }
+                  },
+              .finished = [this](int job, const QString& /*output*/) { endJob(job, std::nullopt); },
+              .failed = [this](int job, const EngineFailure& failure) { endJob(job, failure); },
+          })),
       save_watcher_(new QFutureWatcher<QString>(this)) {
   connect(save_watcher_, &QFutureWatcher<QString>::finished, this, &MainWindow::finishSave);
   resize(1280, 800);
   setCentralWidget(canvas_);
+  statusBar()->addPermanentWidget(engine_status_, 1);
   addMenus();
   addTools();
   addPanels();
@@ -146,6 +162,43 @@ void MainWindow::addMenus() {
   view_menu_->addAction(QStringLiteral("&Fit to Window"), QKeySequence(Qt::CTRL | Qt::Key_0),
                         canvas_, &Canvas::fitToWindow);
   view_menu_->addSeparator();
+
+  QMenu* diffusion = menuBar()->addMenu(QStringLiteral("&Diffusion"));
+  diffusion->addAction(QStringLiteral("&Load Model..."), this, &MainWindow::chooseModel);
+  diffusion->addAction(QStringLiteral("&Cancel"), this, &MainWindow::cancelJobs);
+}
+
+void MainWindow::loadModel(const QString& path,
+                           std::function<void(const std::optional<EngineFailure>&)> ended) {
+  const int job = engine_->load(path);
+  engine_jobs_[job] = {.model = path, .ended = std::move(ended)};
+  engine_status_->showLoad(path);
+}
+
+void MainWindow::cancelJobs() {
+  for (const auto& [job, ended] : engine_jobs_) {
+    engine_->cancel(job);
+  }
+}
+
+void MainWindow::endJob(int job, const std::optional<EngineFailure>& failure) {
+  auto node = engine_jobs_.extract(job);
+  if (node.empty()) {
+    return;
+  }
+  engine_status_->showEnd(node.mapped().model, failure, !engine_jobs_.empty());
+  if (node.mapped().ended) {
+    node.mapped().ended(failure);
+  }
+}
+
+void MainWindow::chooseModel() {
+  const QString path =
+      QFileDialog::getOpenFileName(this, QStringLiteral("Load Model"), QString(),
+                                   QStringLiteral("SDXL checkpoints (*.safetensors)"));
+  if (!path.isEmpty()) {
+    loadModel(path, {});
+  }
 }
 
 void MainWindow::openImage(const QString& path, std::function<void(const QString& error)> done) {
@@ -187,6 +240,10 @@ void MainWindow::addLayers(int count) {
       tiles.addLayer();
     }
   });
+}
+
+void MainWindow::fillMask(const QPolygonF& outline) {
+  canvas_->edit([&outline](TileStore& tiles) { pinsel::fillMask(tiles, outline, 1.0, false); });
 }
 
 void MainWindow::showImage(TileStore tiles, const QString& path) {
@@ -402,6 +459,7 @@ void MainWindow::addTools() {
       std::tuple{"Brush", "brush", Qt::Key_B, Canvas::Tool::Brush},
       std::tuple{"Eraser", "eraser", Qt::Key_E, Canvas::Tool::Eraser},
       std::tuple{"Mask", "square-dashed", Qt::Key_M, Canvas::Tool::Mask},
+      std::tuple{"Lasso", "lasso", Qt::Key_L, Canvas::Tool::Lasso},
       std::tuple{"Pan", "hand", Qt::Key_H, Canvas::Tool::Pan},
   };
   for (const auto& [name, icon, key, tool] : entries) {

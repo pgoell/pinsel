@@ -35,6 +35,8 @@ mise run bench    # Release build, then the pan and zoom frame times
 mise run profile  # Optimized build with debug info and Tracy, then start pinsel
 ```
 
+Generation runs in a Python sidecar (`sidecar/`), which pinsel starts through [uv](https://docs.astral.sh/uv/) when you load a model (Diffusion > Load Model). mise installs uv; the first load downloads torch and diffusers. [`sidecar/README.md`](sidecar/README.md) describes the protocol between them.
+
 The compiler comes from the system: GCC 13 or Clang 17 or newer, with C++20.
 
 Qt 6.10 or newer, with the Qt SVG and Qt Shader Tools modules, comes from `mise run install-qt` or Qt's own installer. Point CMake at it in `mise.local.toml`, which git ignores:

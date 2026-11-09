@@ -60,6 +60,20 @@ jobs:
           path: build/dev/screenshots/*.png
           if-no-files-found: error
 
+  # The Python sidecar's protocol tests. They need no torch, so the job stays
+  # small; the sidecar is never built or tested with the C++.
+  sidecar:
+    name: Sidecar
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-mise
+        with:
+          install_args: uv
+      - name: pytest
+        run: uv run --project sidecar --locked pytest sidecar
+
   # Posts the Test job's PNGs to the pull request. GitHub has no API to attach
   # an image to a comment, so the job commits them to the `screenshots` branch
   # and links them. It needs write access, so it runs no code from the pull

@@ -1,2 +1,4 @@
 # The icons are a list by design: one SVG per icon, named as Lucide names it.
 resources/icons
+# SDXL's config folder keeps the layout diffusers reads: one folder per pipeline component.
+sidecar/pinsel_sidecar/sdxl_config
