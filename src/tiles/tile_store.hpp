@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QImage>
+#include <QPoint>
 #include <QRect>
 #include <QSize>
 #include <QString>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -44,11 +46,32 @@ class TileStore {
   // names compute them. https://www.w3.org/TR/compositing-1/#blending
   enum class BlendMode : std::uint8_t { Normal, Multiply, Screen, Overlay };
 
+  // A layer as a file holds it: its pixels, which may be null, and where in
+  // the image they sit.
+  struct LayerContent {
+    QString name;
+    bool visible = true;
+    double opacity = 1.0;
+    BlendMode blend = BlendMode::Normal;
+    QImage image;
+    QPoint offset;
+  };
+  // Loads the layer at an index, counted from the bottom. Null stops the load.
+  using LoadLayer = std::function<std::optional<LayerContent>(std::size_t layer)>;
+
   TileStore() = default;
   // One layer, converted to kFormat. Every tile starts dirty. The store stays
   // empty when there is no memory for the tiles. At its peak the store needs
   // memory for the tiles and one more tile on top of image.
   explicit TileStore(const QImage& image);
+  // A stack of count layers over an image of size, with the alpha of mask as
+  // the mask. Loads one layer at a time, so at its peak the store needs memory
+  // for its tiles and one loaded layer. What falls outside size is cut, and
+  // tiles that no layer image covers stay null. Every tile starts dirty. The
+  // store stays empty when count or size is zero, a load fails or there is no
+  // memory.
+  TileStore(QSize size, std::size_t count, const LoadLayer& load, const QImage& mask,
+            std::size_t current);
 
   [[nodiscard]] QSize size() const {
     return size_;
@@ -94,6 +117,11 @@ class TileStore {
   [[nodiscard]] const QImage& layerTile(std::size_t layer, std::size_t index) const {
     return layers_.at(layer).tiles.at(index);
   }
+  // The image covers the layer's painted tiles, and is null when there are
+  // none. Null when there is no memory for the image.
+  [[nodiscard]] std::optional<LayerContent> layerContent(std::size_t layer) const;
+  // Whether anything has painted the mask, even if it was erased again.
+  [[nodiscard]] bool hasMask() const;
   // Each change to the stack first commits the open step, then becomes an undo
   // step of its own. Undo of one brings back the current layer from before it,
   // and redo the one from after it.
@@ -179,6 +207,9 @@ class TileStore {
   };
 
   [[nodiscard]] Layer emptyLayer() const;
+  // Copies image, placed at offset, into the tiles of layer. Returns false
+  // when there is no memory.
+  bool fillLayer(Layer& layer, const QImage& image, QPoint offset, QImage::Format format) const;
   [[nodiscard]] static std::size_t layerBytes(const Layer& layer);
   [[nodiscard]] std::size_t lostBytes(const std::vector<Layer>& layers) const;
   static std::vector<std::size_t> takeFlags(std::vector<bool>& flags);
@@ -215,12 +246,41 @@ struct ReadImage {
 };
 
 // Reads the image file at path, turned upright by its orientation tag, into a
-// store. On failure the store is empty and error says why. Slow for a large
-// image, so callers run it off the UI thread.
+// store. An OpenRaster file (.ora) keeps its layers and, when pinsel wrote it,
+// its mask. On failure the store is empty and error says why. Slow for a
+// large image, so callers run it off the UI thread.
 ReadImage readImage(const QString& path);
 
-// Writes image as a PNG at path, through a temporary file, so a failed write
-// leaves the old file whole. Returns an empty string, or why it failed.
-QString writePng(const QImage& image, const QString& path);
+// A type of file that writeImage writes.
+struct ImageFormat {
+  QLatin1StringView suffix;
+  // A name filter for a file dialog.
+  QLatin1StringView filter;
+  // Keeps the layers and the mask, rather than merging the visible layers.
+  // OpenRaster is the one such format.
+  bool layered = false;
+};
+inline constexpr std::array kImageFormats{
+    ImageFormat{
+        .suffix = QLatin1StringView("png"),
+        .filter = QLatin1StringView("PNG image (*.png)"),
+        .layered = false,
+    },
+    ImageFormat{
+        .suffix = QLatin1StringView("ora"),
+        .filter = QLatin1StringView("OpenRaster image, with layers and mask (*.ora)"),
+        .layered = true,
+    },
+};
+
+// The format that the suffix of path names, if writeImage writes it.
+std::optional<ImageFormat> imageFormatOf(const QString& path);
+
+// Writes tiles at path, through a temporary file, so a failed write leaves the
+// old file whole: an OpenRaster file (.ora) keeps the layers and the mask, and
+// a PNG holds the visible layers merged. Returns an empty string, or why it
+// failed. Slow, so callers run it off the UI thread on a copy of the store,
+// which shares the tiles.
+QString writeImage(const TileStore& tiles, const QString& path);
 
 }  // namespace pinsel
