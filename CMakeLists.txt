@@ -70,7 +70,7 @@ endif()
 target_compile_options(pinsel-canvas PRIVATE ${WARNINGS})
 
 qt_add_executable(pinsel WIN32 src/main.cpp src/ui/main_window.cpp src/ui/new_image_dialog.cpp
-                  src/ui/theme.cpp)
+                  src/ui/theme.cpp src/ui/layers/layers_panel.cpp)
 file(GLOB ICONS CONFIGURE_DEPENDS resources/icons/*.svg)
 qt_add_resources(pinsel icons PREFIX /icons BASE resources/icons FILES ${ICONS})
 target_link_libraries(pinsel PRIVATE pinsel-lib pinsel-canvas Qt6::Concurrent)
@@ -126,6 +126,9 @@ if(BUILD_TESTING)
   add_test(NAME screenshot_1080p
            COMMAND pinsel --screenshot ${SHOTS}/main-window-1080p.png --size 1920x1080
                    --open ${PATTERN})
+  add_test(NAME screenshot_layers
+           COMMAND pinsel --screenshot ${SHOTS}/layers-panel.png --size 1280x800
+                   --new 1024x768 --layers 3)
   add_test(NAME screenshot_4k
            COMMAND pinsel --screenshot ${SHOTS}/main-window-4k.png --size 1920x1080
                    --open ${PATTERN})
@@ -135,15 +138,15 @@ if(BUILD_TESTING)
                    --new 1024x1024)
   # Pin the scale so the screen's own DPI never changes the size. Help goes to the
   # console, not a message box that would hang the test on Windows.
-  set_property(TEST screenshot_1080p screenshot_4k screenshot_new PROPERTY ENVIRONMENT_MODIFICATION
+  set_property(TEST screenshot_1080p screenshot_4k screenshot_new screenshot_layers PROPERTY ENVIRONMENT_MODIFICATION
                QT_ENABLE_HIGHDPI_SCALING=set:0 QT_COMMAND_LINE_PARSER_NO_GUI_MESSAGE_BOXES=set:1)
-  set_property(TEST screenshot_1080p screenshot_new APPEND PROPERTY ENVIRONMENT_MODIFICATION
+  set_property(TEST screenshot_1080p screenshot_new screenshot_layers APPEND PROPERTY ENVIRONMENT_MODIFICATION
                QT_SCALE_FACTOR=set:1)
   set_property(TEST screenshot_4k APPEND PROPERTY ENVIRONMENT_MODIFICATION QT_SCALE_FACTOR=set:2)
   # Windows draws with its native platform to show the real style; offscreen has
   # no fonts there.
   if(NOT WIN32)
-    set_property(TEST screenshot_1080p screenshot_4k screenshot_new bench_smoke APPEND
+    set_property(TEST screenshot_1080p screenshot_4k screenshot_new screenshot_layers bench_smoke APPEND
                  PROPERTY ENVIRONMENT_MODIFICATION QT_QPA_PLATFORM=set:offscreen)
   endif()
 endif()

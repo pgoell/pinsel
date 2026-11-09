@@ -14,7 +14,6 @@
 #include <QIcon>
 #include <QImageReader>
 #include <QKeySequence>
-#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPixmap>
@@ -31,6 +30,7 @@
 
 #include "canvas/canvas.hpp"
 #include "tiles/tile_store.hpp"
+#include "ui/layers/layers_panel.hpp"
 #include "ui/new_image_dialog.hpp"
 
 namespace pinsel {
@@ -115,6 +115,9 @@ void MainWindow::addMenus() {
   const auto updateHistory = [this, undo, redo] {
     undo->setEnabled(canvas_->tiles().canUndo());
     redo->setEnabled(canvas_->tiles().canRedo());
+    if (layers_ != nullptr) {
+      layers_->refresh();
+    }
     updateTitle();
   };
   canvas_->setHistoryChanged(updateHistory);
@@ -160,6 +163,14 @@ bool MainWindow::newImage(QSize size, const QColor& background) {
   ++latest_open_;
   showImage(std::move(tiles), QString());
   return true;
+}
+
+void MainWindow::addLayers(int count) {
+  canvas_->edit([count](TileStore& tiles) {
+    for (int added = 0; added < count; ++added) {
+      tiles.addLayer();
+    }
+  });
 }
 
 void MainWindow::showImage(TileStore tiles, const QString& path) {
@@ -374,7 +385,8 @@ void MainWindow::addTools() {
 
 void MainWindow::addPanels() {
   auto* layers = new QDockWidget(QStringLiteral("Layers"), this);
-  layers->setWidget(new QListWidget(layers));
+  layers_ = new LayersPanel(canvas_, layers);
+  layers->setWidget(layers_);
   addDockWidget(Qt::RightDockWidgetArea, layers);
 
   auto* brush = new QDockWidget(QStringLiteral("Brush"), this);

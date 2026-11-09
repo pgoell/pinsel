@@ -7,6 +7,7 @@
 #include <QString>
 #include <QTemporaryDir>
 #include <cstddef>
+#include <cstdint>
 #include <tuple>
 #include <vector>
 
@@ -269,6 +270,128 @@ TEST(TileStore, ClearingAnEmptyMaskAddsNoStep) {
   TileStore store = cleanStore();
   store.clearMask();
   EXPECT_FALSE(store.canUndo());
+}
+
+std::vector<std::uint64_t> ids(const TileStore& store) {
+  std::vector<std::uint64_t> ids;
+  ids.reserve(store.layerCount());
+  for (std::size_t layer = 0; layer < store.layerCount(); ++layer) {
+    ids.push_back(store.layerId(layer));
+  }
+  return ids;
+}
+
+TEST(TileStoreLayers, ANewLayerIsEmptyCurrentAndAboveTheCurrentOne) {
+  TileStore store = cleanStore();
+  const std::size_t bytes = store.bytes();
+  store.addLayer();
+  ASSERT_EQ(store.layerCount(), 2U);
+  EXPECT_EQ(store.currentLayer(), 1U);
+  EXPECT_EQ(store.layerName(0), QStringLiteral("Background"));
+  EXPECT_EQ(store.layerName(1), QStringLiteral("Layer 1"));
+  EXPECT_TRUE(store.layerTile(1, 0).isNull());
+  EXPECT_EQ(store.bytes(), bytes);
+  store.setCurrentLayer(0);
+  store.addLayer();
+  EXPECT_EQ(store.currentLayer(), 1U);
+  EXPECT_EQ(store.layerName(1), QStringLiteral("Layer 2"));
+}
+
+TEST(TileStoreLayers, PaintGoesToTheCurrentLayerAndTheImageStacksThem) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  fill(store, QRect(5, 5, 1, 1), Qt::red);
+  EXPECT_EQ(store.layerTile(1, 0).pixelColor(5, 5), QColor(Qt::red));
+  EXPECT_EQ(store.layerTile(1, 0).pixelColor(6, 6).alpha(), 0);
+  EXPECT_EQ(store.layerTile(0, 0).pixelColor(5, 5), QColor(Qt::white));
+  EXPECT_TRUE(store.layerTile(1, 1).isNull());
+  EXPECT_EQ(store.takeLayerDirty(1), (Indices{0}));
+  EXPECT_TRUE(store.takeLayerDirty(0).empty());
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
+  EXPECT_EQ(at(store, QPoint(6, 6)), QColor(Qt::white));
+}
+
+TEST(TileStoreLayers, AHiddenLayerLeavesTheImageAsAnUndoStep) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  fillAndCommit(store, Qt::red);
+  const auto shown = store.revision();
+  store.setLayerVisible(1, false);
+  EXPECT_FALSE(store.layerVisible(1));
+  EXPECT_NE(store.revision(), shown);
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::white));
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.revision(), shown);
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
+}
+
+TEST(TileStoreLayers, UndoBringsBackADeletedLayerWithItsTiles) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  fillAndCommit(store, Qt::red);
+  const std::uint64_t id = store.layerId(1);
+  std::ignore = store.takeLayerDirty(1);
+  const std::size_t undo_bytes = store.undoBytes();
+
+  ASSERT_TRUE(store.removeLayer());
+  EXPECT_EQ(store.layerCount(), 1U);
+  EXPECT_EQ(store.currentLayer(), 0U);
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::white));
+  EXPECT_EQ(store.undoBytes(), undo_bytes + static_cast<std::size_t>(kTile * kTile * 4));
+
+  ASSERT_TRUE(store.undo());
+  ASSERT_EQ(store.layerCount(), 2U);
+  EXPECT_EQ(store.layerId(1), id);
+  EXPECT_EQ(store.currentLayer(), 1U);
+  EXPECT_EQ(store.takeLayerDirty(1), (Indices{0}));
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
+}
+
+TEST(TileStoreLayers, TheOnlyLayerStays) {
+  TileStore store = cleanStore();
+  EXPECT_FALSE(store.removeLayer());
+  EXPECT_EQ(store.layerCount(), 1U);
+  EXPECT_FALSE(store.canUndo());
+}
+
+TEST(TileStoreLayers, MoveReordersTheStackAndUndoPutsItBack) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  store.addLayer();
+  const std::vector<std::uint64_t> before = ids(store);
+  store.moveLayer(2, 0);
+  EXPECT_EQ(ids(store), (std::vector{before.at(2), before.at(0), before.at(1)}));
+  EXPECT_EQ(store.currentLayer(), 0U);
+  store.moveLayer(0, 1);
+  EXPECT_EQ(ids(store), (std::vector{before.at(0), before.at(2), before.at(1)}));
+  ASSERT_TRUE(store.undo());
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(ids(store), before);
+  EXPECT_EQ(store.currentLayer(), 2U);
+}
+
+TEST(TileStoreLayers, PaintAndLayerStepsUndoAndRedoInOrder) {
+  TileStore store = cleanStore();
+  store.addLayer();
+  fillAndCommit(store, Qt::red);
+  ASSERT_TRUE(store.undo());
+  EXPECT_TRUE(store.layerTile(1, 0).isNull());
+  ASSERT_TRUE(store.undo());
+  EXPECT_EQ(store.layerCount(), 1U);
+  EXPECT_FALSE(store.undo());
+  ASSERT_TRUE(store.redo());
+  ASSERT_TRUE(store.redo());
+  EXPECT_EQ(store.layerCount(), 2U);
+  EXPECT_EQ(at(store, QPoint(5, 5)), QColor(Qt::red));
+}
+
+TEST(TileStoreLayers, TheMaskStaysOneAboveEveryLayer) {
+  TileStore store = cleanStore();
+  mask(store, QRect(5, 5, 1, 1));
+  store.addLayer();
+  EXPECT_EQ(maskAt(store, QPoint(5, 5)), 255);
+  EXPECT_TRUE(store.removeLayer());
+  EXPECT_EQ(maskAt(store, QPoint(5, 5)), 255);
 }
 
 }  // namespace

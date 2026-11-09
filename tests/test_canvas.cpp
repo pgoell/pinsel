@@ -137,4 +137,13 @@ TEST_F(CanvasTest, EraseMaskEmptiesTheMaskAndUndoBringsItBack) {
   EXPECT_EQ(maskAt(QPoint(200, 150)), 255);
 }
 
+TEST_F(CanvasTest, BrushPaintsOnTheCurrentLayer) {
+  canvas().edit([](TileStore& tiles) { tiles.addLayer(); });
+  drag(canvas(), kAcross);
+  const TileStore& tiles = canvas().tiles();
+  EXPECT_EQ(tiles.layerTile(1, 0).pixelColor(200, 150), QColor(Qt::black));
+  EXPECT_EQ(tiles.layerTile(0, 0).pixelColor(200, 150), QColor(Qt::white));
+  EXPECT_EQ(at(QPoint(200, 150)), QColor(Qt::black));
+}
+
 }  // namespace
