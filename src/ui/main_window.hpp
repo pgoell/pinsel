@@ -49,6 +49,11 @@ class MainWindow : public QMainWindow {
   // Inpaints the mask with prompt, as Generate in the prompt panel does, and
   // calls done with whether a layer was added.
   void inpaint(const QString& prompt, const std::function<void(bool added)>& done);
+  [[nodiscard]] const TileStore& tiles() const;
+  // As the engine reported it at the end of its last job.
+  [[nodiscard]] const std::optional<EngineMemory>& engineMemory() const {
+    return engine_->memory();
+  }
 
  protected:
   void closeEvent(QCloseEvent* event) override;

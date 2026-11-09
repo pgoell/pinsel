@@ -35,6 +35,11 @@ struct Inbox {
   }
 };
 
+// The memory a card with 8 GiB might report at the end of a job.
+QJsonObject gpu() {
+  return {{"free_mb", 1024.0}, {"total_mb", 8192.0}, {"peak_mb", 6912.0}};
+}
+
 void send(const QJsonObject& event) {
   const QByteArray line = QJsonDocument(event).toJson(QJsonDocument::Compact) + '\n';
   std::fwrite(line.constData(), 1, static_cast<std::size_t>(line.size()), stdout);
@@ -104,7 +109,7 @@ void finish(int job, const QJsonObject& request) {
   if (request.value("op").toString() == QLatin1String("inpaint") && !writeInpaint(request)) {
     fail(job, "failed", QStringLiteral("ValueError: unreadable image or mask"));
   } else {
-    send({{"event", "done"}, {"job", job}, {"output", request.value("output")}});
+    send({{"event", "done"}, {"job", job}, {"output", request.value("output")}, {"gpu", gpu()}});
   }
 }
 
@@ -136,7 +141,7 @@ int main() {
         fail(job, "failed", QStringLiteral("FileNotFoundError: missing"));
       } else if (runSteps(inbox, job, QStringLiteral("load"), 2, path == QLatin1String("crash"))) {
         model = path;
-        send({{"event", "done"}, {"job", job}});
+        send({{"event", "done"}, {"job", job}, {"gpu", gpu()}});
       }
     } else if (model.isEmpty()) {
       fail(job, "failed", QStringLiteral("RuntimeError: No model loaded"));

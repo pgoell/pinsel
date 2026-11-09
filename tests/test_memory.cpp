@@ -1,9 +1,15 @@
 #include <gtest/gtest.h>
 
 #include <QColor>
+#include <QFile>
 #include <QImage>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QPainter>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QRect>
+#include <QTemporaryDir>
 #include <atomic>
 #include <cstddef>
 
@@ -92,6 +98,45 @@ TEST(TileStoreMemory, UndoKeepsOnlyTheTilesAPaintTouched) {
   store.commit();
   EXPECT_EQ(store.undoBytes(), 2 * kTileBytes);
   EXPECT_EQ(store.bytes(), k4KBytes);
+}
+
+// The fake engine reports 6912 MB of GPU memory at its peak.
+TEST(MemoryReport, CountsTheImageTheProcessAndTheEngine) {
+  const QTemporaryDir dir;
+  const QString report = dir.filePath(QStringLiteral("report.json"));
+  QProcess pinsel;
+  QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+  environment.insert(QStringLiteral("PINSEL_ENGINE"), QStringLiteral(PINSEL_FAKE_ENGINE));
+  pinsel.setProcessEnvironment(environment);
+  pinsel.start(QStringLiteral(PINSEL_EXE), {
+                                               QStringLiteral("--new"),
+                                               QStringLiteral("3840x2160"),
+                                               QStringLiteral("--load-model"),
+                                               QStringLiteral("sdxl.safetensors"),
+                                               QStringLiteral("--memory-report"),
+                                               report,
+                                               QStringLiteral("--screenshot"),
+                                               dir.filePath(QStringLiteral("window.png")),
+                                               QStringLiteral("--size"),
+                                               QStringLiteral("1280x800"),
+                                           });
+  ASSERT_TRUE(pinsel.waitForFinished(60'000));
+  ASSERT_EQ(pinsel.exitCode(), 0) << pinsel.readAllStandardError().toStdString();
+  QFile file(report);
+  ASSERT_TRUE(file.open(QIODevice::ReadOnly));
+  const QJsonObject json = QJsonDocument::fromJson(file.readAll()).object();
+  const QJsonObject image = json.value(QStringLiteral("image")).toObject();
+  EXPECT_DOUBLE_EQ(image.value(QStringLiteral("tiles_mb")).toDouble(), 31.640625);
+  EXPECT_DOUBLE_EQ(image.value(QStringLiteral("undo_mb")).toDouble(), 0.0);
+  const double private_mb = json.value(QStringLiteral("process"))
+                                .toObject()
+                                .value(QStringLiteral("private_mb"))
+                                .toDouble();
+  EXPECT_GT(private_mb, 31.640625);
+  EXPECT_DOUBLE_EQ(
+      json.value(QStringLiteral("engine")).toObject().value(QStringLiteral("peak_mb")).toDouble(),
+      6912.0);
+  EXPECT_TRUE(QFile::exists(dir.filePath(QStringLiteral("window.png"))));
 }
 
 #ifdef PINSEL_ASAN

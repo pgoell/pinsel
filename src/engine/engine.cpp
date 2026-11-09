@@ -239,6 +239,9 @@ void Engine::handle(const QByteArray& line) {
   if (!open) {
     return;
   }
+  if (kind == QLatin1String("done")) {
+    readMemory(event.value(QLatin1String("gpu")).toObject());
+  }
   if (kind == QLatin1String("done") && wire == job) {
     open_.erase(job);
     if (events_.finished) {
@@ -250,6 +253,17 @@ void Engine::handle(const QByteArray& line) {
                   .message = event.value(QLatin1String("message")).toString(),
               });
   }
+}
+
+void Engine::readMemory(const QJsonObject& gpu) {
+  if (gpu.isEmpty()) {
+    return;
+  }
+  memory_ = EngineMemory{
+      .free_mb = gpu.value(QLatin1String("free_mb")).toDouble(),
+      .total_mb = gpu.value(QLatin1String("total_mb")).toDouble(),
+      .peak_mb = gpu.value(QLatin1String("peak_mb")).toDouble(),
+  };
 }
 
 void Engine::end(int wire_job) {

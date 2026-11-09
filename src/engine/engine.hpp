@@ -8,6 +8,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 
 class QJsonObject;
@@ -50,6 +51,14 @@ struct EngineFailure {
   };
   Kind kind;
   QString message;
+};
+
+// The engine's GPU, in MiB, as it reported at the end of a job.
+struct EngineMemory {
+  double free_mb;
+  double total_mb;
+  // The most the engine held at once during the job.
+  double peak_mb;
 };
 
 struct EngineProgress {
@@ -99,6 +108,10 @@ class Engine {
   [[nodiscard]] bool busy() const {
     return !open_.empty();
   }
+  // From the last job that finished, if its engine reports memory.
+  [[nodiscard]] const std::optional<EngineMemory>& memory() const {
+    return memory_;
+  }
 
  private:
   // Sends a job that needs the model, loading it first after a restart.
@@ -108,6 +121,7 @@ class Engine {
   void readEvents();
   void handleLines(const QByteArray& lines);
   void handle(const QByteArray& line);
+  void readMemory(const QJsonObject& gpu);
   void end(int wire_job);
   void fail(int job, const EngineFailure& failure);
   void stopped(const QString& message);
@@ -129,6 +143,7 @@ class Engine {
   // it. A job after a restart loads it again.
   QString model_;
   bool process_has_model_ = false;
+  std::optional<EngineMemory> memory_;
 };
 
 }  // namespace pinsel
